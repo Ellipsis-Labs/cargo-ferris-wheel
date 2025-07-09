@@ -21,7 +21,7 @@
 //! ## Example
 //!
 //! ```
-//! use cargo_ferris_wheel::ConfigBuilder;
+//! use cargo_ferris_wheel::common::ConfigBuilder;
 //! use cargo_ferris_wheel::detector::CycleDetector;
 //! use cargo_ferris_wheel::graph::{DependencyEdge, DependencyType, WorkspaceNode};
 //! use petgraph::graph::DiGraph;
