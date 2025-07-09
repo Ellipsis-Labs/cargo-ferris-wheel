@@ -66,7 +66,7 @@ pub trait FromCommand: Sized {
     fn from_command(command: crate::cli::Commands) -> Result<Self, crate::error::FerrisWheelError>;
 }
 
-/// Macro to implement TryFrom<Commands> using FromCommand trait
+/// Macro to implement `TryFrom<Commands>` using [`FromCommand`] trait
 #[macro_export]
 macro_rules! impl_try_from_command {
     ($config:ty) => {

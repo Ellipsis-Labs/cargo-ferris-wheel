@@ -19,7 +19,7 @@
 //! ## Example
 //!
 //! ```
-//! use cargo_ferris_wheel::ConfigBuilder;
+//! use cargo_ferris_wheel::common::ConfigBuilder;
 //! use cargo_ferris_wheel::graph::{DependencyEdge, DependencyType, GraphRenderer, WorkspaceNode};
 //! use petgraph::graph::DiGraph;
 //!
