@@ -1,3 +1,5 @@
+[![Docs](https://docs.rs/cargo-ferris-wheel/badge.svg)](https://docs.rs/cargo-ferris-wheel) [![Crates.io](https://img.shields.io/crates/v/cargo-ferris-wheel)](https://crates.io/crates/cargo-ferris-wheel) [![Build & test](https://github.com/Ellipsis-labs/cargo-ferris-wheel/actions/workflows/build.yaml/badge.svg)](https://github.com/Ellipsis-labs/cargo-ferris-wheel/actions/workflows/build.yaml)
+
 # 🎡 Ferris Wheel
 
 <div align="center">
