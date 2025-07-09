@@ -4,12 +4,12 @@ categories    = ["development-tools", "development-tools::cargo-plugins"]
 description   = "🎡 Detect workspace dependency cycles in Rust monorepos"
 documentation = "https://docs.rs/cargo-ferris-wheel"
 edition       = "2024"
-homepage      = "https://github.com/ellipsis-dev/cargo-ferris-wheel"
+homepage      = "https://github.com/Ellipsis-labs/cargo-ferris-wheel"
 keywords      = ["cargo", "workspace", "dependencies", "cycles", "monorepo"]
 license       = "MIT"
 name          = "cargo-ferris-wheel"
 readme        = "README.md"
-repository    = "https://github.com/ellipsis-dev/cargo-ferris-wheel"
+repository    = "https://github.com/Ellipsis-labs/cargo-ferris-wheel"
 rust-version  = "1.88.0"
 version       = "1.0.1"
 
