@@ -1,0 +1,195 @@
+//! Dependency classification logic extracted from analyzer
+//!
+//! This module handles the classification of dependencies into their
+//! appropriate types (normal, dev, build, target-specific) based on the TOML
+//! dependency information.
+
+use std::collections::HashMap;
+
+use crate::analyzer::Dependency;
+use crate::toml_parser::{
+    CargoToml, Dependency as TomlDependency, DependencyType as TomlDependencyType,
+};
+
+/// Classifies dependencies from a parsed Cargo.toml into categorized vectors
+pub struct DependencyClassifier {
+    pub dependencies: Vec<Dependency>,
+    pub dev_dependencies: Vec<Dependency>,
+    pub build_dependencies: Vec<Dependency>,
+    pub target_dependencies: HashMap<String, Vec<Dependency>>,
+}
+
+impl Default for DependencyClassifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DependencyClassifier {
+    /// Create a new empty classifier
+    pub fn new() -> Self {
+        Self {
+            dependencies: Vec::new(),
+            dev_dependencies: Vec::new(),
+            build_dependencies: Vec::new(),
+            target_dependencies: HashMap::new(),
+        }
+    }
+
+    /// Classify dependencies from a CargoToml
+    pub fn classify_from_toml(
+        cargo_toml: &CargoToml,
+        workspace_deps: &HashMap<String, std::path::PathBuf>,
+    ) -> Self {
+        let mut classifier = Self::new();
+
+        for (dep_name, dep, dep_type) in cargo_toml.get_all_dependencies() {
+            if !Self::is_relevant_dependency(&dep_name, &dep, workspace_deps) {
+                continue;
+            }
+
+            let dependency = Self::create_dependency(&dep_name, &dep_type);
+            classifier.add_dependency(dependency, dep_type);
+        }
+
+        classifier
+    }
+
+    /// Check if a dependency is relevant (i.e., is a path or workspace
+    /// dependency)
+    fn is_relevant_dependency(
+        dep_name: &str,
+        dep: &TomlDependency,
+        workspace_deps: &HashMap<String, std::path::PathBuf>,
+    ) -> bool {
+        if CargoToml::is_workspace_dependency(dep) {
+            workspace_deps.contains_key(dep_name)
+        } else {
+            CargoToml::extract_path(dep).is_some()
+        }
+    }
+
+    /// Create a Dependency struct from name and type
+    fn create_dependency(dep_name: &str, dep_type: &TomlDependencyType) -> Dependency {
+        Dependency {
+            name: dep_name.to_string(),
+            target: match dep_type {
+                TomlDependencyType::Target(t)
+                | TomlDependencyType::TargetDev(t)
+                | TomlDependencyType::TargetBuild(t) => Some(t.clone()),
+                _ => None,
+            },
+        }
+    }
+
+    /// Add a dependency to the appropriate collection based on its type
+    fn add_dependency(&mut self, dependency: Dependency, dep_type: TomlDependencyType) {
+        match dep_type {
+            TomlDependencyType::Normal => {
+                self.dependencies.push(dependency);
+            }
+            TomlDependencyType::Dev => {
+                self.dev_dependencies.push(dependency);
+            }
+            TomlDependencyType::Build => {
+                self.build_dependencies.push(dependency);
+            }
+            TomlDependencyType::Target(target) => {
+                self.target_dependencies
+                    .entry(target)
+                    .or_default()
+                    .push(dependency);
+            }
+            TomlDependencyType::TargetDev(_) | TomlDependencyType::TargetBuild(_) => {
+                // Treat target-specific dev/build dependencies as regular target dependencies
+                if let Some(target) = dependency.target.clone() {
+                    self.target_dependencies
+                        .entry(target)
+                        .or_default()
+                        .push(dependency);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_classifier() {
+        let classifier = DependencyClassifier::new();
+        assert!(classifier.dependencies.is_empty());
+        assert!(classifier.dev_dependencies.is_empty());
+        assert!(classifier.build_dependencies.is_empty());
+        assert!(classifier.target_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_create_dependency_normal() {
+        let dep =
+            DependencyClassifier::create_dependency("test-crate", &TomlDependencyType::Normal);
+        assert_eq!(dep.name, "test-crate");
+        assert!(dep.target.is_none());
+    }
+
+    #[test]
+    fn test_create_dependency_with_target() {
+        let dep = DependencyClassifier::create_dependency(
+            "test-crate",
+            &TomlDependencyType::Target("wasm32-unknown-unknown".to_string()),
+        );
+        assert_eq!(dep.name, "test-crate");
+        assert_eq!(dep.target, Some("wasm32-unknown-unknown".to_string()));
+    }
+
+    #[test]
+    fn test_add_dependencies() {
+        let mut classifier = DependencyClassifier::new();
+
+        // Add normal dependency
+        classifier.add_dependency(
+            Dependency {
+                name: "normal-dep".to_string(),
+                target: None,
+            },
+            TomlDependencyType::Normal,
+        );
+        assert_eq!(classifier.dependencies.len(), 1);
+
+        // Add dev dependency
+        classifier.add_dependency(
+            Dependency {
+                name: "dev-dep".to_string(),
+                target: None,
+            },
+            TomlDependencyType::Dev,
+        );
+        assert_eq!(classifier.dev_dependencies.len(), 1);
+
+        // Add build dependency
+        classifier.add_dependency(
+            Dependency {
+                name: "build-dep".to_string(),
+                target: None,
+            },
+            TomlDependencyType::Build,
+        );
+        assert_eq!(classifier.build_dependencies.len(), 1);
+
+        // Add target dependency
+        classifier.add_dependency(
+            Dependency {
+                name: "target-dep".to_string(),
+                target: Some("wasm32-unknown-unknown".to_string()),
+            },
+            TomlDependencyType::Target("wasm32-unknown-unknown".to_string()),
+        );
+        assert_eq!(classifier.target_dependencies.len(), 1);
+        assert_eq!(
+            classifier.target_dependencies["wasm32-unknown-unknown"].len(),
+            1
+        );
+    }
+}

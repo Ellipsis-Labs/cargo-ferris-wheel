@@ -1,0 +1,350 @@
+<svg width="400" height="450" viewBox="0 0 400 450" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Sunset/evening gradient -->
+    <linearGradient id="skyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a237e;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#e91e63;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff6f00;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Glow effect for lights -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Star for decoration -->
+    <polygon id="star" points="0,-5 1.5,-1.5 5,-0.5 1.5,1.5 0,5 -1.5,1.5 -5,-0.5 -1.5,-1.5" fill="#FFF59D"/>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="400" height="450" fill="url(#skyGradient)"/>
+  
+  <!-- Ground -->
+  <rect x="0" y="380" width="400" height="70" fill="#263238"/>
+  
+  <!-- Background stars -->
+  <g opacity="0.6">
+    <use href="#star" transform="translate(50,30) scale(0.8)"/>
+    <use href="#star" transform="translate(120,50) scale(0.6)"/>
+    <use href="#star" transform="translate(280,40) scale(0.7)"/>
+    <use href="#star" transform="translate(350,60) scale(0.5)"/>
+    <use href="#star" transform="translate(80,80) scale(0.4)"/>
+    <use href="#star" transform="translate(320,90) scale(0.6)"/>
+  </g>
+  
+  <!-- Main wheel structure -->
+  <g transform="translate(200,180)">
+    <!-- Outer rim with double rings -->
+    <circle r="150" fill="none" stroke="#455A64" stroke-width="8"/>
+    <circle r="145" fill="none" stroke="#607D8B" stroke-width="4"/>
+    <circle r="155" fill="none" stroke="#607D8B" stroke-width="4"/>
+    
+    <!-- Inner support rings -->
+    <circle r="100" fill="none" stroke="#546E7A" stroke-width="2" opacity="0.5"/>
+    <circle r="50" fill="none" stroke="#546E7A" stroke-width="2" opacity="0.5"/>
+    
+    <!-- Center hub -->
+    <circle r="20" fill="#FFD700" stroke="#FFA000" stroke-width="3"/>
+    <circle r="15" fill="#FFF59D"/>
+    <circle r="10" fill="#FFD700"/>
+    
+    <!-- Spokes - 16 total for realism -->
+    <g stroke="#78909C" stroke-width="3">
+      <g id="spoke">
+        <line x1="0" y1="0" x2="0" y2="-150"/>
+      </g>
+      <use href="#spoke" transform="rotate(22.5)"/>
+      <use href="#spoke" transform="rotate(45)"/>
+      <use href="#spoke" transform="rotate(67.5)"/>
+      <use href="#spoke" transform="rotate(90)"/>
+      <use href="#spoke" transform="rotate(112.5)"/>
+      <use href="#spoke" transform="rotate(135)"/>
+      <use href="#spoke" transform="rotate(157.5)"/>
+      <use href="#spoke" transform="rotate(180)"/>
+      <use href="#spoke" transform="rotate(202.5)"/>
+      <use href="#spoke" transform="rotate(225)"/>
+      <use href="#spoke" transform="rotate(247.5)"/>
+      <use href="#spoke" transform="rotate(270)"/>
+      <use href="#spoke" transform="rotate(292.5)"/>
+      <use href="#spoke" transform="rotate(315)"/>
+      <use href="#spoke" transform="rotate(337.5)"/>
+    </g>
+    
+    <!-- Gondolas - 16 total -->
+    <g id="gondolas">
+      <!-- Gondola 1 -->
+      <g transform="rotate(0)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(0)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#E91E63" stroke="#AD1457" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#C2185B"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 2 -->
+      <g transform="rotate(22.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-22.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#FF5722" stroke="#D84315" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#E64A19"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 3 -->
+      <g transform="rotate(45)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-45)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#FF9800" stroke="#E65100" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#F57C00"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 4 -->
+      <g transform="rotate(67.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-67.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#FFC107" stroke="#F57F17" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#FFA000"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 5 -->
+      <g transform="rotate(90)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-90)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#FFEB3B" stroke="#F9A825" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#FDD835"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 6 -->
+      <g transform="rotate(112.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-112.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#CDDC39" stroke="#9E9D24" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#C0CA33"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 7 -->
+      <g transform="rotate(135)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-135)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#8BC34A" stroke="#558B2F" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#7CB342"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 8 -->
+      <g transform="rotate(157.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-157.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#4CAF50" stroke="#2E7D32" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#43A047"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 9 -->
+      <g transform="rotate(180)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-180)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#009688" stroke="#00695C" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#00897B"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 10 -->
+      <g transform="rotate(202.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-202.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#00BCD4" stroke="#0097A7" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#00ACC1"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 11 -->
+      <g transform="rotate(225)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-225)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#03A9F4" stroke="#0277BD" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#039BE5"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 12 -->
+      <g transform="rotate(247.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-247.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#2196F3" stroke="#1565C0" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#1E88E5"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 13 -->
+      <g transform="rotate(270)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-270)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#3F51B5" stroke="#283593" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#3949AB"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 14 -->
+      <g transform="rotate(292.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-292.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#673AB7" stroke="#4527A0" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#5E35B1"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 15 -->
+      <g transform="rotate(315)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-315)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#9C27B0" stroke="#6A1B9A" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#8E24AA"/>
+          </g>
+        </g>
+      </g>
+      
+      <!-- Gondola 16 -->
+      <g transform="rotate(337.5)">
+        <g transform="translate(0,-150)">
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#607D8B" stroke-width="2"/>
+          <g transform="rotate(-337.5)">
+            <rect x="-15" y="8" width="30" height="22" rx="3" fill="#E91E63" stroke="#AD1457" stroke-width="1.5"/>
+            <rect x="-12" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="2" y="11" width="10" height="8" fill="#FFF9C4" opacity="0.8"/>
+            <rect x="-15" y="25" width="30" height="5" rx="2" fill="#C2185B"/>
+          </g>
+        </g>
+      </g>
+    </g>
+    
+    <!-- LED lights on rim -->
+    <g filter="url(#glow)">
+      <g id="lights">
+        <circle cx="0" cy="-150" r="3" fill="#FFEB3B"/>
+        <circle cx="0" cy="-150" r="3" fill="#E91E63" transform="rotate(11.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#00BCD4" transform="rotate(22.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#8BC34A" transform="rotate(33.75)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FF5722" transform="rotate(45)"/>
+        <circle cx="0" cy="-150" r="3" fill="#3F51B5" transform="rotate(56.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FFEB3B" transform="rotate(67.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#E91E63" transform="rotate(78.75)"/>
+        <circle cx="0" cy="-150" r="3" fill="#00BCD4" transform="rotate(90)"/>
+        <circle cx="0" cy="-150" r="3" fill="#8BC34A" transform="rotate(101.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FF5722" transform="rotate(112.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#3F51B5" transform="rotate(123.75)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FFEB3B" transform="rotate(135)"/>
+        <circle cx="0" cy="-150" r="3" fill="#E91E63" transform="rotate(146.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#00BCD4" transform="rotate(157.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#8BC34A" transform="rotate(168.75)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FF5722" transform="rotate(180)"/>
+        <circle cx="0" cy="-150" r="3" fill="#3F51B5" transform="rotate(191.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FFEB3B" transform="rotate(202.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#E91E63" transform="rotate(213.75)"/>
+        <circle cx="0" cy="-150" r="3" fill="#00BCD4" transform="rotate(225)"/>
+        <circle cx="0" cy="-150" r="3" fill="#8BC34A" transform="rotate(236.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FF5722" transform="rotate(247.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#3F51B5" transform="rotate(258.75)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FFEB3B" transform="rotate(270)"/>
+        <circle cx="0" cy="-150" r="3" fill="#E91E63" transform="rotate(281.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#00BCD4" transform="rotate(292.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#8BC34A" transform="rotate(303.75)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FF5722" transform="rotate(315)"/>
+        <circle cx="0" cy="-150" r="3" fill="#3F51B5" transform="rotate(326.25)"/>
+        <circle cx="0" cy="-150" r="3" fill="#FFEB3B" transform="rotate(337.5)"/>
+        <circle cx="0" cy="-150" r="3" fill="#E91E63" transform="rotate(348.75)"/>
+      </g>
+    </g>
+  </g>
+  
+  <!-- Support structure (rendered after wheel so it appears in front) -->
+  <g stroke="#37474F" stroke-width="6" fill="none">
+    <!-- Main supports connecting to center hub at 180 -->
+    <path d="M200,180 L150,420 M200,180 L250,420"/>
+    <path d="M150,420 L250,420"/>
+    <!-- Cross bracing -->
+    <path d="M175,300 L225,300 M180,350 L220,350" stroke-width="3"/>
+    <!-- Additional cross bracing for stability -->
+    <path d="M170,250 L230,250" stroke-width="3"/>
+  </g>
+  
+  <!-- Title banner -->
+  <g transform="translate(200, 425)">
+    <!-- Modern banner background -->
+    <rect x="-120" y="-18" width="240" height="36" rx="18" fill="#263238" stroke="#FFD700" stroke-width="2"/>
+    
+    <!-- Text with modern circus style - vertically centered using dy -->
+    <text x="0" y="0" dy="0.35em" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="22" font-weight="900" fill="#FFFFFF" stroke="#E91E63" stroke-width="1.5" paint-order="stroke fill">FERRIS WHEEL</text>
+    
+    <!-- Side decorations -->
+    <circle cx="-130" cy="0" r="8" fill="#FFD700" filter="url(#glow)"/>
+    <circle cx="130" cy="0" r="8" fill="#FFD700" filter="url(#glow)"/>
+  </g>
+</svg>
