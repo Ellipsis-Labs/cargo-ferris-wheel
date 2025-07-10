@@ -1022,4 +1022,68 @@ version = "0.1.0"
         let standalone_crate = &parsed.affected_crates[0];
         assert!(standalone_crate.is_standalone);
     }
+
+    #[test]
+    fn test_cargo_manifest_files_mapping() {
+        let temp = create_simple_test_workspace();
+        let analysis = build_test_analysis(temp.path());
+
+        // Test that Cargo.toml files are properly mapped to their crates
+        let files = vec![
+            format!("{}/my-workspace/crate-a/Cargo.toml", temp.path().display()),
+            format!("{}/my-workspace/crate-b/Cargo.toml", temp.path().display()),
+        ];
+        let result = analysis.analyze_affected_files(&files);
+
+        // Both crates should be directly affected by their Cargo.toml files
+        assert_eq!(result.directly_affected_crates.len(), 2);
+        assert!(result.directly_affected_crates.contains("crate-a"));
+        assert!(result.directly_affected_crates.contains("crate-b"));
+
+        // The workspace should be affected
+        assert!(result.directly_affected_workspaces.contains("my-workspace"));
+    }
+
+    #[test]
+    fn test_workspace_cargo_toml_mapping() {
+        let temp = create_simple_test_workspace();
+        let analysis = build_test_analysis(temp.path());
+
+        // Test workspace-level Cargo.toml
+        let files = vec![format!("{}/my-workspace/Cargo.toml", temp.path().display())];
+        let result = analysis.analyze_affected_files(&files);
+
+        // Workspace Cargo.toml should not map to any specific crate
+        assert_eq!(result.unmatched_files.len(), 1);
+        assert_eq!(
+            result.unmatched_files[0],
+            format!("{}/my-workspace/Cargo.toml", temp.path().display())
+        );
+    }
+
+    #[test]
+    fn test_cargo_lock_file_mapping() {
+        let temp = create_mixed_workspace_and_standalone();
+        let analysis = build_test_analysis(temp.path());
+
+        // Test Cargo.lock files
+        let files = vec![
+            format!("{}/real-workspace/Cargo.lock", temp.path().display()),
+            format!("{}/standalone-test-crate/Cargo.lock", temp.path().display()),
+        ];
+        let result = analysis.analyze_affected_files(&files);
+
+        // Standalone crate's Cargo.lock should map to the crate
+        assert!(
+            result
+                .directly_affected_crates
+                .contains("standalone-test-crate")
+        );
+
+        // Workspace Cargo.lock should not map to any specific crate
+        assert!(result.unmatched_files.contains(&format!(
+            "{}/real-workspace/Cargo.lock",
+            temp.path().display()
+        )));
+    }
 }
