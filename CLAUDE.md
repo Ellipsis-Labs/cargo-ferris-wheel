@@ -32,7 +32,7 @@ cargo audit                   # Security audit
 ```bash
 cargo run -- inspect          # Check for circular dependencies
 cargo run -- spectacle        # Generate dependency graph visualization
-cargo run -- ripples --files src/lib.rs  # Find affected workspaces
+cargo run -- ripples src/lib.rs  # Find affected workspaces
 cargo run -- lineup           # List all dependencies
 cargo run -- spotlight <crate>  # Analyze specific crate
 ```

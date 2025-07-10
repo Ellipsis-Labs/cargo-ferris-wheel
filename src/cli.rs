@@ -196,11 +196,11 @@ pub enum Commands {
                       Supports JSON output for easy integration."
     )]
     Ripples {
-        /// List of changed files (comma-separated or specify multiple times)
+        /// List of changed files
         #[arg(
-            long,
-            value_delimiter = ',',
             required = true,
+            value_name = "FILES",
+            help = "Files that have changed",
             env = "CARGO_FERRIS_WHEEL_FILES"
         )]
         files: Vec<String>,
@@ -213,8 +213,17 @@ pub enum Commands {
         #[arg(long, env = "CARGO_FERRIS_WHEEL_DIRECT_ONLY")]
         direct_only: bool,
 
-        #[command(flatten)]
-        common: CommonArgs,
+        /// Exclude dev-dependencies from analysis
+        #[arg(long, env = "CARGO_FERRIS_WHEEL_EXCLUDE_DEV")]
+        exclude_dev: bool,
+
+        /// Exclude build-dependencies from analysis
+        #[arg(long, env = "CARGO_FERRIS_WHEEL_EXCLUDE_BUILD")]
+        exclude_build: bool,
+
+        /// Exclude target-specific dependencies
+        #[arg(long, env = "CARGO_FERRIS_WHEEL_EXCLUDE_TARGET")]
+        exclude_target: bool,
 
         #[command(flatten)]
         format: FormatArgs,

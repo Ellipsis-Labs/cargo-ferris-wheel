@@ -39,17 +39,21 @@ impl FromCommand for AffectedConfig {
                 files,
                 show_crates,
                 direct_only,
-                common,
+                exclude_dev,
+                exclude_build,
+                exclude_target,
                 format,
             } => AffectedConfig::builder()
                 .with_files(files)
                 .with_show_crates(show_crates)
                 .with_direct_only(direct_only)
-                .with_paths(common.get_paths())
+                .with_paths(vec![
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                ])
                 .with_format(format.format)
-                .with_exclude_dev(common.exclude_dev)
-                .with_exclude_build(common.exclude_build)
-                .with_exclude_target(common.exclude_target)
+                .with_exclude_dev(exclude_dev)
+                .with_exclude_build(exclude_build)
+                .with_exclude_target(exclude_target)
                 .build(),
             _ => Err(FerrisWheelError::ConfigurationError {
                 message: "Invalid command type for AffectedConfig".to_string(),
