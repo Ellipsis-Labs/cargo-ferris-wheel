@@ -19,13 +19,13 @@ use crate::graph::{DependencyEdge, WorkspaceNode};
 /// JSON output structure for workspace dependencies
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkspaceDepsJsonReport {
-    pub workspace_dependencies: Vec<WorkspaceDepsEntry>,
+    pub workspaces: Vec<WorkspaceDepsEntry>,
 }
 
 /// Individual workspace entry in the JSON report
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkspaceDepsEntry {
-    pub workspace: String,
+    pub name: String,
     pub path: String,
     pub dependencies: Vec<String>,
     pub reverse: bool,
@@ -320,7 +320,7 @@ impl WorkspaceDepsReportGenerator {
                 .unwrap_or_else(|| "(unknown)".to_string());
 
             workspace_data.push(WorkspaceDepsEntry {
-                workspace: workspace.clone(),
+                name: workspace.clone(),
                 path: workspace_path,
                 dependencies: deps,
                 reverse: self.reverse,
@@ -330,7 +330,7 @@ impl WorkspaceDepsReportGenerator {
         }
 
         let report = WorkspaceDepsJsonReport {
-            workspace_dependencies: workspace_data,
+            workspaces: workspace_data,
         };
 
         Ok(serde_json::to_string_pretty(&report)?)
