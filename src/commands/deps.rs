@@ -19,13 +19,13 @@ use crate::graph::{DependencyEdge, WorkspaceNode};
 /// JSON output structure for workspace dependencies
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkspaceDepsJsonReport {
-    pub workspace_dependencies: Vec<WorkspaceDepsEntry>,
+    pub workspaces: Vec<WorkspaceDepsEntry>,
 }
 
 /// Individual workspace entry in the JSON report
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkspaceDepsEntry {
-    pub workspace: String,
+    pub name: String,
     pub path: String,
     pub dependencies: Vec<String>,
     pub reverse: bool,
@@ -320,7 +320,7 @@ impl WorkspaceDepsReportGenerator {
                 .unwrap_or_else(|| "(unknown)".to_string());
 
             workspace_data.push(WorkspaceDepsEntry {
-                workspace: workspace.clone(),
+                name: workspace.clone(),
                 path: workspace_path,
                 dependencies: deps,
                 reverse: self.reverse,
@@ -330,7 +330,7 @@ impl WorkspaceDepsReportGenerator {
         }
 
         let report = WorkspaceDepsJsonReport {
-            workspace_dependencies: workspace_data,
+            workspaces: workspace_data,
         };
 
         Ok(serde_json::to_string_pretty(&report)?)
@@ -618,10 +618,10 @@ mod tests {
         let report = generator.generate_json_report(&mut analysis).unwrap();
 
         let json: serde_json::Value = serde_json::from_str(&report).unwrap();
-        assert!(json["workspace_dependencies"].is_array());
+        assert!(json["workspaces"].is_array());
 
         // Verify path field exists in the JSON output
-        let workspace_deps = json["workspace_dependencies"].as_array().unwrap();
+        let workspace_deps = json["workspaces"].as_array().unwrap();
         assert!(!workspace_deps.is_empty());
         assert!(workspace_deps[0]["path"].is_string());
     }
