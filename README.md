@@ -188,26 +188,23 @@ Unlike naive approaches that rebuild everything or guess based on directory name
 
 ```bash
 # Show what's affected by changed files
-cargo ferris-wheel ripples --files src/lib.rs,tests/integration.rs
+cargo ferris-wheel ripples src/lib.rs tests/integration.rs
 
 # Include crate-level information in output
-cargo ferris-wheel ripples --files src/lib.rs --show-crates
+cargo ferris-wheel ripples src/lib.rs --show-crates
 
 # Show only directly affected crates (no reverse dependencies)
-cargo ferris-wheel ripples --files src/lib.rs --direct-only
+cargo ferris-wheel ripples src/lib.rs --direct-only
 
 # Output as JSON for CI integration
-cargo ferris-wheel ripples --files src/lib.rs --format json
+cargo ferris-wheel ripples src/lib.rs --format json
 
-# Multiple files can be specified
-cargo ferris-wheel ripples --files src/lib.rs --files src/main.rs
-
-# Or use comma separation
-cargo ferris-wheel ripples --files src/lib.rs,src/main.rs,Cargo.toml
+# Multiple files can be specified as positional arguments
+cargo ferris-wheel ripples src/lib.rs src/main.rs Cargo.toml
 
 # Exclude specific dependency types from analysis
-cargo ferris-wheel ripples --files src/lib.rs --exclude-dev
-cargo ferris-wheel ripples --files src/lib.rs --exclude-build --exclude-target
+cargo ferris-wheel ripples src/lib.rs --exclude-dev
+cargo ferris-wheel ripples src/lib.rs --exclude-build --exclude-target
 ```
 
 Example JSON output:
@@ -486,10 +483,10 @@ jobs:
 - name: Analyze affected workspaces
   run: |
     # Get list of changed files from git
-    CHANGED_FILES=$(git diff --name-only origin/main...HEAD | paste -sd "," -)
+    CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
 
     # Use ferris-wheel to determine affected workspaces
-    AFFECTED=$(cargo ferris-wheel ripples --files "$CHANGED_FILES" --format json)
+    AFFECTED=$(cargo ferris-wheel ripples $CHANGED_FILES --format json)
     echo "$AFFECTED"
 
     # Extract just the workspace names for your build matrix
@@ -499,7 +496,7 @@ jobs:
 # Example: Only run if specific workspaces are affected
 - name: Build affected workspaces
   run: |
-    AFFECTED=$(cargo ferris-wheel ripples --files "$CHANGED_FILES" --format json)
+    AFFECTED=$(cargo ferris-wheel ripples $CHANGED_FILES --format json)
     if echo "$AFFECTED" | jq -e '.affected_workspaces | contains(["core"])'; then
       echo "Core workspace affected, running specialized tests..."
       cargo test -p core
