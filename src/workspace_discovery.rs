@@ -12,6 +12,15 @@ pub struct WorkspaceDiscovery {
     discovered_roots: HashSet<PathBuf>,
     /// Warnings collected during discovery that didn't prevent processing
     warnings: Vec<String>,
+    /// Track discovered workspaces for member checking
+    discovered_workspaces: Vec<DiscoveredWorkspace>,
+}
+
+#[derive(Debug, Clone)]
+struct DiscoveredWorkspace {
+    path: PathBuf,
+    member_patterns: Vec<String>,
+    exclude_patterns: Vec<String>,
 }
 
 impl WorkspaceDiscovery {
@@ -19,12 +28,77 @@ impl WorkspaceDiscovery {
         Self {
             discovered_roots: HashSet::new(),
             warnings: Vec::new(),
+            discovered_workspaces: Vec::new(),
         }
     }
 
     /// Get warnings collected during discovery
     pub fn warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// Check if a path is a member of any discovered workspace
+    fn is_path_workspace_member(&self, crate_path: &Path) -> bool {
+        for workspace in &self.discovered_workspaces {
+            if self.is_member_of_workspace(crate_path, workspace) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a path is a member of a specific workspace
+    fn is_member_of_workspace(&self, crate_path: &Path, workspace: &DiscoveredWorkspace) -> bool {
+        // First check if the crate is within the workspace directory
+        if !crate_path.starts_with(&workspace.path) {
+            return false;
+        }
+
+        // Get the relative path from workspace root
+        let Ok(relative_path) = crate_path.strip_prefix(&workspace.path) else {
+            return false;
+        };
+        let relative_str = relative_path.to_string_lossy();
+
+        // Check exclude patterns first
+        for exclude_pattern in &workspace.exclude_patterns {
+            if self.matches_pattern(&workspace.path, &relative_str, exclude_pattern) {
+                return false;
+            }
+        }
+
+        // Check member patterns
+        for member_pattern in &workspace.member_patterns {
+            if self.matches_pattern(&workspace.path, &relative_str, member_pattern) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Check if a path matches a glob pattern
+    fn matches_pattern(&self, workspace_path: &Path, relative_path: &str, pattern: &str) -> bool {
+        if pattern.contains('*') {
+            // Handle glob pattern
+            let glob_pattern = workspace_path.join(pattern);
+            if let Some(glob_str) = glob_pattern.to_str()
+                && let Ok(glob_matcher) = glob::Pattern::new(glob_str)
+            {
+                let full_path = workspace_path.join(relative_path);
+                if let Some(full_path_str) = full_path.to_str() {
+                    return glob_matcher.matches(full_path_str);
+                }
+            }
+            // Alternative: just check if the relative path matches the pattern
+            if let Ok(pattern_matcher) = glob::Pattern::new(pattern) {
+                return pattern_matcher.matches(relative_path);
+            }
+        } else {
+            // Direct path comparison
+            return relative_path == pattern || relative_path.starts_with(&format!("{pattern}/"));
+        }
+        false
     }
 
     /// Discover all workspace roots and standalone crates in the given paths
@@ -128,6 +202,8 @@ impl WorkspaceDiscovery {
                                             .to_string(),
                                     )
                                     .members(Vec::new()) // Will be populated later
+                                    .member_patterns(cargo_toml.get_workspace_members())
+                                    .exclude_patterns(cargo_toml.get_workspace_excludes())
                                     .workspace_dependencies(cargo_toml.get_workspace_dependencies())
                                     .with_is_standalone(false)
                                     .build()
@@ -155,6 +231,8 @@ impl WorkspaceDiscovery {
                                             .path(dir)
                                             .name(package.name.clone())
                                             .members(vec![member])
+                                            .member_patterns(vec![]) // Standalone crates have no member patterns
+                                            .exclude_patterns(vec![]) // Standalone crates have no exclude patterns
                                             .workspace_dependencies(Default::default())
                                             .with_is_standalone(true)
                                             .build()
@@ -195,9 +273,23 @@ impl WorkspaceDiscovery {
 
         // Separate roots and warnings
         let mut new_roots = Vec::new();
+        let mut potential_standalone_crates = Vec::new();
+
         for (root, warnings) in results {
             if let Some(r) = root {
-                new_roots.push(r);
+                if r.is_standalone {
+                    // Don't add standalone crates yet, we need to verify they're not workspace
+                    // members
+                    potential_standalone_crates.push(r);
+                } else {
+                    // This is a workspace root, track it
+                    self.discovered_workspaces.push(DiscoveredWorkspace {
+                        path: r.path.clone(),
+                        member_patterns: r.member_patterns().to_vec(),
+                        exclude_patterns: r.exclude_patterns().to_vec(),
+                    });
+                    new_roots.push(r);
+                }
             }
             self.warnings.extend(warnings);
         }
@@ -227,6 +319,22 @@ impl WorkspaceDiscovery {
                 }
             }
             roots.push(root);
+        }
+
+        // Now check potential standalone crates to see if they're actually workspace
+        // members
+        for crate_root in potential_standalone_crates {
+            if !self.is_path_workspace_member(&crate_root.path) {
+                // This is truly a standalone crate
+                roots.push(crate_root);
+            } else {
+                // This is actually a workspace member, skip it
+                self.warnings.push(format!(
+                    "Skipping '{}' at {} - it's a workspace member with an incorrect Cargo.lock",
+                    crate_root.name,
+                    crate_root.path.display()
+                ));
+            }
         }
 
         // Also check for workspace roots without Cargo.lock (less common but possible)
@@ -269,6 +377,16 @@ impl WorkspaceDiscovery {
             match CargoToml::parse_file(cargo_toml_path) {
                 Ok(cargo_toml) if cargo_toml.is_workspace_root() => {
                     self.discovered_roots.insert(dir.to_path_buf());
+                    let member_patterns = cargo_toml.get_workspace_members();
+                    let exclude_patterns = cargo_toml.get_workspace_excludes();
+
+                    // Track this workspace for member checking
+                    self.discovered_workspaces.push(DiscoveredWorkspace {
+                        path: dir.to_path_buf(),
+                        member_patterns: member_patterns.to_vec(),
+                        exclude_patterns: exclude_patterns.to_vec(),
+                    });
+
                     match self.expand_workspace_members(dir, &cargo_toml) {
                         Ok(members) => {
                             roots.push(WorkspaceRoot {
@@ -279,6 +397,8 @@ impl WorkspaceDiscovery {
                                     .to_string_lossy()
                                     .to_string(),
                                 members,
+                                member_patterns,
+                                exclude_patterns,
                                 workspace_dependencies: cargo_toml.get_workspace_dependencies(),
                                 is_standalone: false,
                             });
@@ -428,6 +548,8 @@ pub struct WorkspaceRoot {
     path: PathBuf,
     name: String,
     members: Vec<WorkspaceMember>,
+    member_patterns: Vec<String>,
+    exclude_patterns: Vec<String>,
     workspace_dependencies: std::collections::HashMap<String, PathBuf>,
     is_standalone: bool,
 }
@@ -462,6 +584,16 @@ impl WorkspaceRoot {
     pub fn is_standalone(&self) -> bool {
         self.is_standalone
     }
+
+    /// Gets the member patterns
+    pub fn member_patterns(&self) -> &[String] {
+        &self.member_patterns
+    }
+
+    /// Gets the exclude patterns
+    pub fn exclude_patterns(&self) -> &[String] {
+        &self.exclude_patterns
+    }
 }
 
 /// Builder for WorkspaceRoot
@@ -470,6 +602,8 @@ pub struct WorkspaceRootBuilder {
     path: Option<PathBuf>,
     name: Option<String>,
     members: Vec<WorkspaceMember>,
+    member_patterns: Vec<String>,
+    exclude_patterns: Vec<String>,
     workspace_dependencies: std::collections::HashMap<String, PathBuf>,
     is_standalone: bool,
 }
@@ -508,6 +642,18 @@ impl WorkspaceRootBuilder {
         self
     }
 
+    /// Sets the member patterns
+    pub fn member_patterns(mut self, patterns: Vec<String>) -> Self {
+        self.member_patterns = patterns;
+        self
+    }
+
+    /// Sets the exclude patterns
+    pub fn exclude_patterns(mut self, patterns: Vec<String>) -> Self {
+        self.exclude_patterns = patterns;
+        self
+    }
+
     /// Builds the WorkspaceRoot
     pub fn build(self) -> Result<WorkspaceRoot, &'static str> {
         let path = self.path.ok_or("path is required")?;
@@ -517,6 +663,8 @@ impl WorkspaceRootBuilder {
             path,
             name,
             members: self.members,
+            member_patterns: self.member_patterns,
+            exclude_patterns: self.exclude_patterns,
             workspace_dependencies: self.workspace_dependencies,
             is_standalone: self.is_standalone,
         })
@@ -692,5 +840,108 @@ name = "standalone-crate"
         assert_eq!(workspace.name, "workspace");
         assert_eq!(workspace.members.len(), 2);
         assert!(workspace.workspace_dependencies.contains_key("shared"));
+    }
+
+    #[test]
+    fn test_workspace_member_with_incorrect_cargo_lock() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create workspace root
+        fs::create_dir_all(root.join("workspace")).unwrap();
+        fs::write(
+            root.join("workspace/Cargo.toml"),
+            r#"
+[workspace]
+members = ["crate-a"]
+"#,
+        )
+        .unwrap();
+        fs::write(root.join("workspace/Cargo.lock"), "# workspace lock file").unwrap();
+
+        // Create member crate with its own Cargo.lock (incorrect)
+        fs::create_dir_all(root.join("workspace/crate-a")).unwrap();
+        fs::write(
+            root.join("workspace/crate-a/Cargo.toml"),
+            r#"
+[package]
+name = "crate-a"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("workspace/crate-a/Cargo.lock"),
+            "# incorrect lock file",
+        )
+        .unwrap();
+
+        let mut discovery = WorkspaceDiscovery::new();
+        let roots = discovery.discover_all(&[root.to_path_buf()], None).unwrap();
+
+        // Should only find one workspace, not a standalone crate
+        assert_eq!(roots.len(), 1);
+        assert!(!roots[0].is_standalone);
+        assert_eq!(roots[0].name, "workspace");
+
+        // Check that we got a warning about the incorrect Cargo.lock
+        let warnings = discovery.warnings();
+        assert!(warnings.iter().any(|w| w.contains("incorrect Cargo.lock")));
+    }
+
+    #[test]
+    fn test_workspace_with_glob_members() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create workspace root with glob pattern
+        fs::create_dir_all(root).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            r#"
+[workspace]
+members = ["crates/*"]
+exclude = ["crates/ignored"]
+"#,
+        )
+        .unwrap();
+        fs::write(root.join("Cargo.lock"), "# workspace lock file").unwrap();
+
+        // Create member crates
+        fs::create_dir_all(root.join("crates/foo")).unwrap();
+        fs::write(
+            root.join("crates/foo/Cargo.toml"),
+            r#"
+[package]
+name = "foo"
+"#,
+        )
+        .unwrap();
+        // Add incorrect Cargo.lock
+        fs::write(root.join("crates/foo/Cargo.lock"), "# incorrect lock file").unwrap();
+
+        // Create excluded crate (should be standalone)
+        fs::create_dir_all(root.join("crates/ignored")).unwrap();
+        fs::write(
+            root.join("crates/ignored/Cargo.toml"),
+            r#"
+[package]
+name = "ignored"
+"#,
+        )
+        .unwrap();
+        fs::write(root.join("crates/ignored/Cargo.lock"), "# lock file").unwrap();
+
+        let mut discovery = WorkspaceDiscovery::new();
+        let roots = discovery.discover_all(&[root.to_path_buf()], None).unwrap();
+
+        // Should find workspace and the excluded standalone crate
+        assert_eq!(roots.len(), 2);
+
+        let workspace = roots.iter().find(|r| !r.is_standalone).unwrap();
+        assert_eq!(workspace.member_patterns(), &["crates/*"]);
+        assert_eq!(workspace.exclude_patterns(), &["crates/ignored"]);
+
+        let standalone = roots.iter().find(|r| r.is_standalone).unwrap();
+        assert_eq!(standalone.name, "ignored");
     }
 }

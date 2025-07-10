@@ -26,6 +26,7 @@ pub struct WorkspaceDepsJsonReport {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkspaceDepsEntry {
     pub workspace: String,
+    pub path: String,
     pub dependencies: Vec<String>,
     pub reverse: bool,
     pub transitive: bool,
@@ -119,6 +120,14 @@ impl WorkspaceDependencyAnalysis {
         self.workspaces
             .values()
             .find(|ws| ws.name() == workspace_name)
+    }
+
+    /// Get workspace path by name
+    pub fn get_workspace_path(&self, workspace_name: &str) -> Option<&PathBuf> {
+        self.workspaces
+            .iter()
+            .find(|(_, ws)| ws.name() == workspace_name)
+            .map(|(path, _)| path)
     }
 
     /// Get direct dependencies of a workspace
@@ -226,6 +235,11 @@ impl WorkspaceDepsReportGenerator {
         for workspace in workspaces {
             writeln!(output, "\n📦 Workspace: {workspace}")?;
 
+            // Add workspace path if available
+            if let Some(workspace_path) = analysis.get_workspace_path(&workspace) {
+                writeln!(output, "  📍 Path: {}", workspace_path.display())?;
+            }
+
             if self.reverse {
                 writeln!(output, "  ⬆️  Reverse dependencies (who depends on this):")?;
                 let reverse_deps = analysis.get_reverse_dependencies(&workspace);
@@ -300,8 +314,14 @@ impl WorkspaceDepsReportGenerator {
                 .map(|info| info.is_standalone())
                 .unwrap_or(false);
 
+            let workspace_path = analysis
+                .get_workspace_path(&workspace)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "(unknown)".to_string());
+
             workspace_data.push(WorkspaceDepsEntry {
-                workspace,
+                workspace: workspace.clone(),
+                path: workspace_path,
                 dependencies: deps,
                 reverse: self.reverse,
                 transitive: self.transitive,
@@ -583,6 +603,7 @@ mod tests {
         let report = generator.generate_human_report(&mut analysis).unwrap();
 
         assert!(report.contains("workspace-a"));
+        assert!(report.contains("Path: /test/workspace-a"));
         assert!(report.contains("Direct dependencies"));
         assert!(report.contains("workspace-b"));
     }
@@ -598,5 +619,10 @@ mod tests {
 
         let json: serde_json::Value = serde_json::from_str(&report).unwrap();
         assert!(json["workspace_dependencies"].is_array());
+
+        // Verify path field exists in the JSON output
+        let workspace_deps = json["workspace_dependencies"].as_array().unwrap();
+        assert!(!workspace_deps.is_empty());
+        assert!(workspace_deps[0]["path"].is_string());
     }
 }

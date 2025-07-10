@@ -82,7 +82,7 @@ impl CommandExecutor for DepsExecutor {
         };
 
         match report_result {
-            Ok(report) => print!("{report}"),
+            Ok(report) => println!("{report}"),
             Err(e) => {
                 return Err(e)
                     .into_diagnostic()
