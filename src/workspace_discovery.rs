@@ -84,9 +84,7 @@ impl WorkspaceDiscovery {
             // First try matching the full path
             let full_path = workspace_path.join(relative_path);
             if let Some(full_path_str) = full_path.to_str() {
-                if pattern_matcher.matches(full_path_str) {
-                    return true;
-                }
+                return pattern_matcher.matches(full_path_str);
             }
             // Fallback: check if the relative path matches the pattern directly
             return pattern_matcher.matches(relative_path);
