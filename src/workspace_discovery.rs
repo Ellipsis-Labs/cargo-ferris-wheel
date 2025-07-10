@@ -62,14 +62,14 @@ impl WorkspaceDiscovery {
 
         // Check exclude patterns first
         for exclude_pattern in &workspace.exclude_patterns {
-            if self.matches_pattern(&workspace.path, &relative_str, exclude_pattern) {
+            if self.matches_pattern(&relative_str, exclude_pattern) {
                 return false;
             }
         }
 
         // Check member patterns
         for member_pattern in &workspace.member_patterns {
-            if self.matches_pattern(&workspace.path, &relative_str, member_pattern) {
+            if self.matches_pattern(&relative_str, member_pattern) {
                 return true;
             }
         }
@@ -78,15 +78,10 @@ impl WorkspaceDiscovery {
     }
 
     /// Check if a path matches a glob pattern
-    fn matches_pattern(&self, workspace_path: &Path, relative_path: &str, pattern: &str) -> bool {
+    fn matches_pattern(&self, relative_path: &str, pattern: &str) -> bool {
         // Try to use glob::Pattern::new for all patterns, not just those with '*'
         if let Ok(pattern_matcher) = glob::Pattern::new(pattern) {
-            // First try matching the full path
-            let full_path = workspace_path.join(relative_path);
-            if let Some(full_path_str) = full_path.to_str() {
-                return pattern_matcher.matches(full_path_str);
-            }
-            // Fallback: check if the relative path matches the pattern directly
+            // Match against the relative path
             return pattern_matcher.matches(relative_path);
         }
 
