@@ -137,7 +137,7 @@ impl CommandExecutor for AnalyzeExecutor {
         };
 
         match report_result {
-            Ok(report) => print!("{report}"),
+            Ok(report) => println!("{report}"),
             Err(e) => {
                 return Err(e).wrap_err("Failed to generate report for crate analysis");
             }

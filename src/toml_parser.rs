@@ -101,6 +101,15 @@ impl CargoToml {
             .unwrap_or_default()
     }
 
+    /// Returns the list of workspace exclude patterns from the Cargo.toml
+    pub fn get_workspace_excludes(&self) -> Vec<String> {
+        self.workspace
+            .as_ref()
+            .and_then(|ws| ws.exclude.as_ref())
+            .cloned()
+            .unwrap_or_default()
+    }
+
     pub fn get_workspace_dependencies(&self) -> HashMap<String, PathBuf> {
         let mut deps = HashMap::new();
 
