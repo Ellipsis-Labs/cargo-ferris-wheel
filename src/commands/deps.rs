@@ -618,10 +618,10 @@ mod tests {
         let report = generator.generate_json_report(&mut analysis).unwrap();
 
         let json: serde_json::Value = serde_json::from_str(&report).unwrap();
-        assert!(json["workspace_dependencies"].is_array());
+        assert!(json["workspaces"].is_array());
 
         // Verify path field exists in the JSON output
-        let workspace_deps = json["workspace_dependencies"].as_array().unwrap();
+        let workspace_deps = json["workspaces"].as_array().unwrap();
         assert!(!workspace_deps.is_empty());
         assert!(workspace_deps[0]["path"].is_string());
     }
