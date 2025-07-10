@@ -101,6 +101,7 @@ impl CargoToml {
             .unwrap_or_default()
     }
 
+    /// Returns the list of workspace exclude patterns from the Cargo.toml
     pub fn get_workspace_excludes(&self) -> Vec<String> {
         self.workspace
             .as_ref()

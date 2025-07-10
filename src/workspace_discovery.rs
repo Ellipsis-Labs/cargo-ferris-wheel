@@ -79,26 +79,23 @@ impl WorkspaceDiscovery {
 
     /// Check if a path matches a glob pattern
     fn matches_pattern(&self, workspace_path: &Path, relative_path: &str, pattern: &str) -> bool {
-        if pattern.contains('*') {
-            // Handle glob pattern
-            let glob_pattern = workspace_path.join(pattern);
-            if let Some(glob_str) = glob_pattern.to_str()
-                && let Ok(glob_matcher) = glob::Pattern::new(glob_str)
-            {
-                let full_path = workspace_path.join(relative_path);
-                if let Some(full_path_str) = full_path.to_str() {
-                    return glob_matcher.matches(full_path_str);
+        // Try to use glob::Pattern::new for all patterns, not just those with '*'
+        if let Ok(pattern_matcher) = glob::Pattern::new(pattern) {
+            // First try matching the full path
+            let full_path = workspace_path.join(relative_path);
+            if let Some(full_path_str) = full_path.to_str() {
+                if pattern_matcher.matches(full_path_str) {
+                    return true;
                 }
             }
-            // Alternative: just check if the relative path matches the pattern
-            if let Ok(pattern_matcher) = glob::Pattern::new(pattern) {
-                return pattern_matcher.matches(relative_path);
-            }
-        } else {
-            // Direct path comparison
-            return relative_path == pattern || relative_path.starts_with(&format!("{pattern}/"));
+            // Fallback: check if the relative path matches the pattern directly
+            return pattern_matcher.matches(relative_path);
         }
-        false
+
+        // If glob pattern parsing fails, fall back to direct path comparison
+        let pattern_path = Path::new(pattern);
+        Path::new(relative_path) == pattern_path
+            || Path::new(relative_path).starts_with(pattern_path)
     }
 
     /// Discover all workspace roots and standalone crates in the given paths
