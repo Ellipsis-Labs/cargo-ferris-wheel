@@ -509,6 +509,301 @@ jobs:
 cargo ferris-wheel inspect --error-on-cycles
 ```
 
+## 🎪 Real-World Monorepo Patterns
+
+These examples showcase how cargo-ferris-wheel powers production Rust monorepos, based on real usage patterns.
+
+### 🎯 Optimized CI with Matrix Builds
+
+Create a dynamic build matrix that only tests affected workspaces:
+
+```yaml
+name: Rust CI
+on: [pull_request]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      affected-workspaces: ${{ steps.ripples.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tj-actions/changed-files@v45
+        id: changed-files
+        with:
+          files: |
+            **/*.rs
+            **/Cargo.toml
+            **/Cargo.lock
+      
+      - name: Determine affected workspaces
+        id: ripples
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          # Pass all changed files to ripples at once
+          AFFECTED_JSON=$(cargo ferris-wheel ripples ${{ steps.changed-files.outputs.all_changed_files }} --format json)
+          
+          # Create matrix for GitHub Actions
+          MATRIX=$(echo "$AFFECTED_JSON" | jq -c '{
+            "workspace": .affected_workspaces,
+            "include": [.affected_workspaces[] | {
+              "workspace": .,
+              "path": (.affected_crates[] | select(.workspace == .) | .workspace) // .
+            }]
+          }')
+          
+          echo "affected=$MATRIX" >> $GITHUB_OUTPUT
+
+  test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.affected-workspaces != ''
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.affected-workspaces) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test workspace
+        run: |
+          cd ${{ matrix.path }}
+          cargo test
+```
+
+### 🔧 Automated Workspace Discovery
+
+Instead of hardcoding workspace paths, discover them dynamically:
+
+```bash
+#!/bin/bash
+# Run clippy on all workspaces automatically
+
+# Get all workspace paths using lineup
+workspaces=$(cargo ferris-wheel lineup --format json | jq -r '.workspaces[].path')
+
+# Run clippy in each workspace
+for workspace_path in $workspaces; do
+    echo "Running clippy in $workspace_path"
+    pushd "$workspace_path" > /dev/null
+    cargo clippy --all-targets -- -D warnings
+    popd > /dev/null
+done
+```
+
+### 🎨 Selective Pre-commit Formatting
+
+Format only the workspaces affected by your changes:
+
+```python
+#!/usr/bin/env python3
+# run-rustfmt-with-ferris-wheel.py
+
+import json
+import subprocess
+import sys
+
+def main():
+    # Get changed files from git or command line
+    changed_files = sys.argv[1:] if len(sys.argv) > 1 else []
+    
+    if not changed_files:
+        return
+    
+    # Find affected workspaces
+    result = subprocess.run(
+        ["cargo", "ferris-wheel", "ripples", "--format", "json"] + changed_files,
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        print(f"Error running cargo ferris-wheel: {result.stderr}")
+        sys.exit(1)
+    
+    data = json.loads(result.stdout)
+    
+    # Use directly_affected_workspaces for more precise formatting
+    workspaces = data.get("directly_affected_workspaces", [])
+    
+    # Get workspace paths
+    lineup_result = subprocess.run(
+        ["cargo", "ferris-wheel", "lineup", "--format", "json"],
+        capture_output=True,
+        text=True
+    )
+    
+    lineup_data = json.loads(lineup_result.stdout)
+    workspace_paths = {
+        ws["name"]: ws["path"] 
+        for ws in lineup_data["workspaces"]
+    }
+    
+    # Format each affected workspace
+    for workspace in workspaces:
+        if workspace in workspace_paths:
+            print(f"Formatting {workspace}...")
+            subprocess.run(
+                ["cargo", "fmt"],
+                cwd=workspace_paths[workspace]
+            )
+
+if __name__ == "__main__":
+    main()
+```
+
+### 📦 Hakari Integration (Unified Dependencies)
+
+Use cargo-ferris-wheel with [hakari](https://docs.rs/hakari/latest/hakari/) to manage unified dependencies:
+
+```python
+#!/usr/bin/env python3
+# hakari-update.py - Update workspace-hack in dependency order
+
+import json
+import subprocess
+from collections import defaultdict, deque
+
+def topological_sort(workspaces):
+    """Sort workspaces in dependency order"""
+    # Build adjacency list
+    graph = defaultdict(list)
+    in_degree = defaultdict(int)
+    
+    for ws in workspaces:
+        name = ws["name"]
+        in_degree[name] = 0
+    
+    for ws in workspaces:
+        name = ws["name"]
+        for dep in ws.get("dependencies", []):
+            if dep in in_degree:  # Only consider workspace dependencies
+                graph[dep].append(name)
+                in_degree[name] += 1
+    
+    # Kahn's algorithm
+    queue = deque([ws for ws in in_degree if in_degree[ws] == 0])
+    result = []
+    
+    while queue:
+        current = queue.popleft()
+        result.append(current)
+        
+        for neighbor in graph[current]:
+            in_degree[neighbor] -= 1
+            if in_degree[neighbor] == 0:
+                queue.append(neighbor)
+    
+    return result
+
+def main():
+    # Get all workspaces with dependencies
+    result = subprocess.run(
+        ["cargo", "ferris-wheel", "lineup", "--format", "json"],
+        capture_output=True,
+        text=True
+    )
+    
+    data = json.loads(result.stdout)
+    workspaces = data["workspaces"]
+    
+    # Sort in dependency order
+    sorted_names = topological_sort(workspaces)
+    
+    # Create name to path mapping
+    ws_paths = {ws["name"]: ws["path"] for ws in workspaces}
+    
+    # Update hakari in each workspace
+    for ws_name in sorted_names:
+        if ws_name in ws_paths:
+            ws_path = ws_paths[ws_name]
+            print(f"Updating hakari in {ws_name}...")
+            
+            subprocess.run(
+                ["cargo", "hakari", "generate"],
+                cwd=ws_path
+            )
+
+if __name__ == "__main__":
+    main()
+```
+
+### 🎡 Understanding Ripples Output
+
+The `ripples` command provides rich information about affected components:
+
+```json
+{
+  "affected_crates": [
+    {
+      "name": "my-lib",
+      "workspace": "core",
+      "is_directly_affected": true
+    },
+    {
+      "name": "my-app", 
+      "workspace": "apps",
+      "is_directly_affected": false
+    }
+  ],
+  "affected_workspaces": ["core", "apps"],
+  "directly_affected_crates": ["my-lib"],
+  "directly_affected_workspaces": ["core"]
+}
+```
+
+Key fields:
+- `directly_affected_workspaces`: Workspaces containing changed files
+- `affected_workspaces`: All workspaces impacted (including reverse dependencies)
+- `is_directly_affected`: Whether a crate contains changed files or is only affected transitively
+
+### 🔄 Lineup with Reverse Dependencies
+
+The `--reverse` flag is essential for tools that need to process workspaces in dependency order:
+
+```bash
+# Process workspaces from leaves to roots (useful for hakari)
+cargo ferris-wheel lineup --reverse --format json | \
+  jq -r '.workspaces[] | "\(.name) depends on: \(.dependencies | join(", "))"'
+
+# Get workspaces with no dependencies (leaf nodes)
+cargo ferris-wheel lineup --format json | \
+  jq -r '.workspaces[] | select(.dependencies | length == 0) | .name'
+
+# Find workspaces that depend on a specific workspace
+WORKSPACE="core"
+cargo ferris-wheel lineup --reverse --format json | \
+  jq -r --arg ws "$WORKSPACE" '.workspaces[] | select(.dependencies | contains([$ws])) | .name'
+```
+
+### 🎯 Lefthook Configuration
+
+Complete example of integrating cargo-ferris-wheel with [lefthook](https://github.com/evilmartians/lefthook) for git hooks:
+
+```yaml
+# lefthook.yml
+pre-commit:
+  parallel: true
+  commands:
+    rustfmt:
+      glob: "**/*.rs"
+      run: ./scripts/run-rustfmt-with-ferris-wheel.py {staged_files}
+      stage_fixed: true
+    
+    hakari-update:
+      glob:
+        - "**/Cargo.toml"
+        - "**/Cargo.lock"
+      run: |
+        # Only run if workspace dependencies changed
+        if cargo ferris-wheel ripples {staged_files} --format json | jq -e '.affected_workspaces | length > 1'; then
+          ./scripts/hakari-update.py
+        fi
+      stage_fixed: true
+
+pre-push:
+  commands:
+    check-cycles:
+      run: cargo ferris-wheel inspect --error-on-cycles
+```
+
 ## 🏩 Performance Under the Big Top
 
 Built to handle even the biggest carnival operations:
