@@ -19,9 +19,15 @@ use crate::error::FerrisWheelError;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AffectedJsonReport {
     pub affected_crates: Vec<AffectedCrate>,
-    pub affected_workspaces: Vec<String>,
+    pub affected_workspaces: Vec<AffectedWorkspace>,
     pub directly_affected_crates: Vec<String>,
-    pub directly_affected_workspaces: Vec<String>,
+    pub directly_affected_workspaces: Vec<AffectedWorkspace>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct AffectedWorkspace {
+    pub name: String,
+    pub path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -90,6 +96,10 @@ pub struct AffectedAnalysis {
 }
 
 impl AffectedAnalysis {
+    pub fn workspaces(&self) -> &HashMap<PathBuf, WorkspaceInfo> {
+        &self.workspaces
+    }
+
     pub fn new(
         workspaces: &HashMap<PathBuf, WorkspaceInfo>,
         _crate_to_workspace: &HashMap<String, PathBuf>,
@@ -340,18 +350,50 @@ impl AffectedResult {
         // Sort affected crates by name for deterministic output
         affected_crates.sort_by(|a, b| a.name.cmp(&b.name));
 
-        // Sort workspace names for deterministic output
-        let mut affected_workspaces: Vec<String> =
-            self.all_affected_workspaces.iter().cloned().collect();
-        affected_workspaces.sort();
+        // Create affected workspace objects with paths
+        let mut affected_workspaces: Vec<AffectedWorkspace> = self
+            .all_affected_workspaces
+            .iter()
+            .map(|ws_name| {
+                // Find the workspace path by looking through all workspaces
+                let ws_path = analysis
+                    .workspaces
+                    .iter()
+                    .find(|(_, ws_info)| ws_info.name() == ws_name)
+                    .map(|(path, _)| path.display().to_string())
+                    .unwrap_or_else(|| "(unknown)".to_string());
+
+                AffectedWorkspace {
+                    name: ws_name.clone(),
+                    path: ws_path,
+                }
+            })
+            .collect();
+        affected_workspaces.sort_by(|a, b| a.name.cmp(&b.name));
 
         let mut directly_affected_crates: Vec<String> =
             self.directly_affected_crates.iter().cloned().collect();
         directly_affected_crates.sort();
 
-        let mut directly_affected_workspaces: Vec<String> =
-            self.directly_affected_workspaces.iter().cloned().collect();
-        directly_affected_workspaces.sort();
+        let mut directly_affected_workspaces: Vec<AffectedWorkspace> = self
+            .directly_affected_workspaces
+            .iter()
+            .map(|ws_name| {
+                // Find the workspace path by looking through all workspaces
+                let ws_path = analysis
+                    .workspaces
+                    .iter()
+                    .find(|(_, ws_info)| ws_info.name() == ws_name)
+                    .map(|(path, _)| path.display().to_string())
+                    .unwrap_or_else(|| "(unknown)".to_string());
+
+                AffectedWorkspace {
+                    name: ws_name.clone(),
+                    path: ws_path,
+                }
+            })
+            .collect();
+        directly_affected_workspaces.sort_by(|a, b| a.name.cmp(&b.name));
 
         AffectedJsonReport {
             affected_crates,
@@ -680,7 +722,8 @@ name = "crate-b"
         assert!(
             json_report
                 .directly_affected_workspaces
-                .contains(&"workspace-a".to_string())
+                .iter()
+                .any(|ws| ws.name == "workspace-a")
         );
     }
 

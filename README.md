@@ -223,9 +223,23 @@ Example JSON output:
       "is_directly_affected": false
     }
   ],
-  "affected_workspaces": ["core", "apps"],
+  "affected_workspaces": [
+    {
+      "name": "core",
+      "path": "/home/user/monorepo/core"
+    },
+    {
+      "name": "apps",
+      "path": "/home/user/monorepo/apps"
+    }
+  ],
   "directly_affected_crates": ["my-lib"],
-  "directly_affected_workspaces": ["core"]
+  "directly_affected_workspaces": [
+    {
+      "name": "core",
+      "path": "/home/user/monorepo/core"
+    }
+  ]
 }
 ```
 
@@ -490,14 +504,14 @@ jobs:
     echo "$AFFECTED"
 
     # Extract just the workspace names for your build matrix
-    WORKSPACES=$(echo "$AFFECTED" | jq -r '.affected_workspaces[]')
+    WORKSPACES=$(echo "$AFFECTED" | jq -r '.affected_workspaces[].name')
     echo "Affected workspaces: $WORKSPACES"
 
 # Example: Only run if specific workspaces are affected
 - name: Build affected workspaces
   run: |
     AFFECTED=$(cargo ferris-wheel ripples $CHANGED_FILES --format json)
-    if echo "$AFFECTED" | jq -e '.affected_workspaces | contains(["core"])'; then
+    if echo "$AFFECTED" | jq -e '.affected_workspaces[] | select(.name == "core")'; then
       echo "Core workspace affected, running specialized tests..."
       cargo test -p core
     fi
@@ -535,23 +549,23 @@ jobs:
             **/*.rs
             **/Cargo.toml
             **/Cargo.lock
-      
+
       - name: Determine affected workspaces
         id: ripples
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           # Pass all changed files to ripples at once
           AFFECTED_JSON=$(cargo ferris-wheel ripples ${{ steps.changed-files.outputs.all_changed_files }} --format json)
-          
+
           # Create matrix for GitHub Actions
           MATRIX=$(echo "$AFFECTED_JSON" | jq -c '{
-            "workspace": .affected_workspaces,
+            "workspace": [.affected_workspaces[].name],
             "include": [.affected_workspaces[] | {
-              "workspace": .,
-              "path": (.affected_crates[] | select(.workspace == .) | .workspace) // .
+              "workspace": .name,
+              "path": .path
             }]
           }')
-          
+
           echo "affected=$MATRIX" >> $GITHUB_OUTPUT
 
   test:
@@ -603,39 +617,39 @@ import sys
 def main():
     # Get changed files from git or command line
     changed_files = sys.argv[1:] if len(sys.argv) > 1 else []
-    
+
     if not changed_files:
         return
-    
+
     # Find affected workspaces
     result = subprocess.run(
         ["cargo", "ferris-wheel", "ripples", "--format", "json"] + changed_files,
         capture_output=True,
         text=True
     )
-    
+
     if result.returncode != 0:
         print(f"Error running cargo ferris-wheel: {result.stderr}")
         sys.exit(1)
-    
+
     data = json.loads(result.stdout)
-    
+
     # Use directly_affected_workspaces for more precise formatting
-    workspaces = data.get("directly_affected_workspaces", [])
-    
+    workspaces = [ws["name"] for ws in data.get("directly_affected_workspaces", [])]
+
     # Get workspace paths
     lineup_result = subprocess.run(
         ["cargo", "ferris-wheel", "lineup", "--format", "json"],
         capture_output=True,
         text=True
     )
-    
+
     lineup_data = json.loads(lineup_result.stdout)
     workspace_paths = {
-        ws["name"]: ws["path"] 
+        ws["name"]: ws["path"]
         for ws in lineup_data["workspaces"]
     }
-    
+
     # Format each affected workspace
     for workspace in workspaces:
         if workspace in workspace_paths:
@@ -666,31 +680,31 @@ def topological_sort(workspaces):
     # Build adjacency list
     graph = defaultdict(list)
     in_degree = defaultdict(int)
-    
+
     for ws in workspaces:
         name = ws["name"]
         in_degree[name] = 0
-    
+
     for ws in workspaces:
         name = ws["name"]
         for dep in ws.get("dependencies", []):
             if dep in in_degree:  # Only consider workspace dependencies
                 graph[dep].append(name)
                 in_degree[name] += 1
-    
+
     # Kahn's algorithm
     queue = deque([ws for ws in in_degree if in_degree[ws] == 0])
     result = []
-    
+
     while queue:
         current = queue.popleft()
         result.append(current)
-        
+
         for neighbor in graph[current]:
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
                 queue.append(neighbor)
-    
+
     return result
 
 def main():
@@ -700,22 +714,22 @@ def main():
         capture_output=True,
         text=True
     )
-    
+
     data = json.loads(result.stdout)
     workspaces = data["workspaces"]
-    
+
     # Sort in dependency order
     sorted_names = topological_sort(workspaces)
-    
+
     # Create name to path mapping
     ws_paths = {ws["name"]: ws["path"] for ws in workspaces}
-    
+
     # Update hakari in each workspace
     for ws_name in sorted_names:
         if ws_name in ws_paths:
             ws_path = ws_paths[ws_name]
             print(f"Updating hakari in {ws_name}...")
-            
+
             subprocess.run(
                 ["cargo", "hakari", "generate"],
                 cwd=ws_path
@@ -738,18 +752,33 @@ The `ripples` command provides rich information about affected components:
       "is_directly_affected": true
     },
     {
-      "name": "my-app", 
+      "name": "my-app",
       "workspace": "apps",
       "is_directly_affected": false
     }
   ],
-  "affected_workspaces": ["core", "apps"],
+  "affected_workspaces": [
+    {
+      "name": "core",
+      "path": "/home/user/monorepo/core"
+    },
+    {
+      "name": "apps",
+      "path": "/home/user/monorepo/apps"
+    }
+  ],
   "directly_affected_crates": ["my-lib"],
-  "directly_affected_workspaces": ["core"]
+  "directly_affected_workspaces": [
+    {
+      "name": "core",
+      "path": "/home/user/monorepo/core"
+    }
+  ]
 }
 ```
 
 Key fields:
+
 - `directly_affected_workspaces`: Workspaces containing changed files
 - `affected_workspaces`: All workspaces impacted (including reverse dependencies)
 - `is_directly_affected`: Whether a crate contains changed files or is only affected transitively
@@ -786,7 +815,7 @@ pre-commit:
       glob: "**/*.rs"
       run: ./scripts/run-rustfmt-with-ferris-wheel.py {staged_files}
       stage_fixed: true
-    
+
     hakari-update:
       glob:
         - "**/Cargo.toml"

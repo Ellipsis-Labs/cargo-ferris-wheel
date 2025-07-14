@@ -66,7 +66,7 @@ impl CommandExecutor for AffectedExecutor {
         // Generate report based on format
         let report = match config.format {
             OutputFormat::Json => generate_json_report(&result, &affected_analysis, &config)?,
-            OutputFormat::Human => generate_human_report(&result, &config)?,
+            OutputFormat::Human => generate_human_report(&result, &affected_analysis, &config)?,
             OutputFormat::GitHub => generate_github_report(&result, &config)?,
             OutputFormat::Junit => generate_junit_report(&result, &config)?,
         };
@@ -100,17 +100,13 @@ fn generate_json_report(
                 .into_iter()
                 .filter(|crate_info| crate_info.is_directly_affected)
                 .collect(),
-            affected_workspaces: result
-                .directly_affected_workspaces
-                .iter()
-                .cloned()
+            affected_workspaces: full_report
+                .affected_workspaces
+                .into_iter()
+                .filter(|ws| result.directly_affected_workspaces.contains(&ws.name))
                 .collect(),
             directly_affected_crates: result.directly_affected_crates.iter().cloned().collect(),
-            directly_affected_workspaces: result
-                .directly_affected_workspaces
-                .iter()
-                .cloned()
-                .collect(),
+            directly_affected_workspaces: full_report.directly_affected_workspaces,
         }
     } else {
         result.to_json_report(analysis)
@@ -121,6 +117,7 @@ fn generate_json_report(
 
 fn generate_human_report(
     result: &crate::commands::affected::AffectedResult,
+    analysis: &AffectedAnalysis,
     config: &AffectedConfig,
 ) -> Result<String, FerrisWheelError> {
     let mut output = String::new();
@@ -148,8 +145,16 @@ fn generate_human_report(
         "  Workspaces: {}",
         result.directly_affected_workspaces.len()
     )?;
-    for ws in &result.directly_affected_workspaces {
-        writeln!(output, "    - {ws}")?
+    for ws_name in &result.directly_affected_workspaces {
+        writeln!(output, "    📦 {ws_name}")?;
+        // Find and display the workspace path
+        if let Some((path, _)) = analysis
+            .workspaces()
+            .iter()
+            .find(|(_, ws_info)| ws_info.name() == ws_name)
+        {
+            writeln!(output, "      📍 Path: {}", path.display())?;
+        }
     }
 
     // All affected (including reverse dependencies)
@@ -171,9 +176,17 @@ fn generate_human_report(
             "  Workspaces: {}",
             result.all_affected_workspaces.len()
         )?;
-        for ws in &result.all_affected_workspaces {
-            if !result.directly_affected_workspaces.contains(ws) {
-                writeln!(output, "    - {ws} (indirect)")?
+        for ws_name in &result.all_affected_workspaces {
+            if !result.directly_affected_workspaces.contains(ws_name) {
+                writeln!(output, "    📦 {ws_name} (indirect)")?;
+                // Find and display the workspace path
+                if let Some((path, _)) = analysis
+                    .workspaces()
+                    .iter()
+                    .find(|(_, ws_info)| ws_info.name() == ws_name)
+                {
+                    writeln!(output, "      📍 Path: {}", path.display())?;
+                }
             }
         }
     }
