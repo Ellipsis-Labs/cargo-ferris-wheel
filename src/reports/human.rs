@@ -58,8 +58,15 @@ impl ReportGenerator for HumanReportGenerator {
             writeln!(output, "{} Cycle #{}", style("🔄").yellow(), i + 1)?;
             writeln!(output, "  {} Workspaces involved:", style("📦").blue())?;
 
-            for ws_name in cycle.workspace_names() {
-                writeln!(output, "    {} {}", style("•").dim(), style(ws_name).bold())?;
+            let mut workspace_names = cycle.workspace_names().to_vec();
+            workspace_names.sort();
+            for ws_name in workspace_names {
+                writeln!(
+                    output,
+                    "    {} {}",
+                    style("•").dim(),
+                    style(&ws_name).bold()
+                )?;
             }
 
             writeln!(
@@ -84,7 +91,12 @@ impl ReportGenerator for HumanReportGenerator {
                         style(from_ws).bold(),
                         style(to_ws).bold()
                     )?;
-                    for edge in edges {
+                    let mut sorted_edges = edges.clone();
+                    sorted_edges.sort_by(|a, b| match a.from_crate().cmp(b.from_crate()) {
+                        std::cmp::Ordering::Equal => a.to_crate().cmp(b.to_crate()),
+                        other => other,
+                    });
+                    for edge in sorted_edges {
                         writeln!(
                             output,
                             "      {} {} → {} ({})",

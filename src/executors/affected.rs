@@ -136,7 +136,9 @@ fn generate_human_report(
             "  Crates: {}",
             result.directly_affected_crates.len()
         )?;
-        for crate_name in &result.directly_affected_crates {
+        let mut sorted_crates: Vec<_> = result.directly_affected_crates.iter().collect();
+        sorted_crates.sort();
+        for crate_name in sorted_crates {
             writeln!(output, "    - {crate_name}")?
         }
     }
@@ -145,7 +147,9 @@ fn generate_human_report(
         "  Workspaces: {}",
         result.directly_affected_workspaces.len()
     )?;
-    for ws_name in &result.directly_affected_workspaces {
+    let mut sorted_workspaces: Vec<_> = result.directly_affected_workspaces.iter().collect();
+    sorted_workspaces.sort();
+    for ws_name in sorted_workspaces {
         writeln!(output, "    📦 {ws_name}")?;
         // Find and display the workspace path
         if let Some((path, _)) = analysis
@@ -165,7 +169,9 @@ fn generate_human_report(
         )?;
         if config.show_crates {
             writeln!(output, "  Crates: {}", result.all_affected_crates.len())?;
-            for crate_name in &result.all_affected_crates {
+            let mut sorted_all_crates: Vec<_> = result.all_affected_crates.iter().collect();
+            sorted_all_crates.sort();
+            for crate_name in sorted_all_crates {
                 if !result.directly_affected_crates.contains(crate_name) {
                     writeln!(output, "    - {crate_name} (indirect)")?
                 }
@@ -176,7 +182,9 @@ fn generate_human_report(
             "  Workspaces: {}",
             result.all_affected_workspaces.len()
         )?;
-        for ws_name in &result.all_affected_workspaces {
+        let mut sorted_all_workspaces: Vec<_> = result.all_affected_workspaces.iter().collect();
+        sorted_all_workspaces.sort();
+        for ws_name in sorted_all_workspaces {
             if !result.directly_affected_workspaces.contains(ws_name) {
                 writeln!(output, "    📦 {ws_name} (indirect)")?;
                 // Find and display the workspace path

@@ -22,22 +22,60 @@ impl JsonReportGenerator {
 
 impl ReportGenerator for JsonReportGenerator {
     fn generate_report(&self, detector: &CycleDetector) -> Result<String, FerrisWheelError> {
-        let cycles: Vec<_> = detector
+        let mut cycles: Vec<_> = detector
             .cycles()
             .iter()
             .map(|cycle| {
-                json!({
-                    "workspaces": cycle.workspace_names(),
-                    "edges": cycle.edges().iter().map(|edge| {
+                let mut workspace_names = cycle.workspace_names().to_vec();
+                workspace_names.sort();
+
+                let mut edges: Vec<_> = cycle
+                    .edges()
+                    .iter()
+                    .map(|edge| {
                         json!({
                             "from_crate": edge.from_crate(),
                             "to_crate": edge.to_crate(),
                             "dependency_type": edge.dependency_type(),
                         })
-                    }).collect::<Vec<_>>()
+                    })
+                    .collect();
+
+                // Sort edges by from_crate, then to_crate for consistent ordering
+                edges.sort_by(|a, b| {
+                    let a_from = a["from_crate"].as_str().unwrap_or("");
+                    let b_from = b["from_crate"].as_str().unwrap_or("");
+                    match a_from.cmp(b_from) {
+                        std::cmp::Ordering::Equal => {
+                            let a_to = a["to_crate"].as_str().unwrap_or("");
+                            let b_to = b["to_crate"].as_str().unwrap_or("");
+                            a_to.cmp(b_to)
+                        }
+                        other => other,
+                    }
+                });
+
+                json!({
+                    "workspaces": workspace_names,
+                    "edges": edges
                 })
             })
             .collect();
+
+        // Sort cycles by their first workspace name for consistent ordering
+        cycles.sort_by(|a, b| {
+            let a_workspaces = a["workspaces"].as_array();
+            let b_workspaces = b["workspaces"].as_array();
+            let a_first = a_workspaces
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let b_first = b_workspaces
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            a_first.cmp(b_first)
+        });
 
         let report = json!({
             "has_cycles": detector.has_cycles(),

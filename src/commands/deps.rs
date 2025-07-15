@@ -109,10 +109,13 @@ impl WorkspaceDependencyAnalysis {
 
     /// Get all workspace names
     pub fn workspace_names(&self) -> Vec<String> {
-        self.workspaces
+        let mut names: Vec<String> = self
+            .workspaces
             .values()
             .map(|ws| ws.name().to_string())
-            .collect()
+            .collect();
+        names.sort();
+        names
     }
 
     /// Get workspace info by name
@@ -246,7 +249,9 @@ impl WorkspaceDepsReportGenerator {
                 if reverse_deps.is_empty() {
                     writeln!(output, "    (none)")?;
                 } else {
-                    for dep in reverse_deps {
+                    let mut sorted_deps: Vec<_> = reverse_deps.iter().cloned().collect();
+                    sorted_deps.sort();
+                    for dep in sorted_deps {
                         writeln!(output, "    - {dep}")?;
                     }
                 }
@@ -256,7 +261,9 @@ impl WorkspaceDepsReportGenerator {
                 if transitive_deps.is_empty() {
                     writeln!(output, "    (none)")?;
                 } else {
-                    for dep in transitive_deps {
+                    let mut sorted_deps: Vec<_> = transitive_deps.iter().cloned().collect();
+                    sorted_deps.sort();
+                    for dep in sorted_deps {
                         writeln!(output, "    - {dep}")?;
                     }
                 }
@@ -266,7 +273,9 @@ impl WorkspaceDepsReportGenerator {
                 if direct_deps.is_empty() {
                     writeln!(output, "    (none)")?;
                 } else {
-                    for dep in direct_deps {
+                    let mut sorted_deps: Vec<_> = direct_deps.iter().cloned().collect();
+                    sorted_deps.sort();
+                    for dep in sorted_deps {
                         writeln!(output, "    - {dep}")?;
                     }
                 }
@@ -319,15 +328,21 @@ impl WorkspaceDepsReportGenerator {
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "(unknown)".to_string());
 
+            let mut sorted_deps = deps;
+            sorted_deps.sort();
+
             workspace_data.push(WorkspaceDepsEntry {
                 name: workspace.clone(),
                 path: workspace_path,
-                dependencies: deps,
+                dependencies: sorted_deps,
                 reverse: self.reverse,
                 transitive: self.transitive,
                 is_standalone,
             });
         }
+
+        // Sort workspace_data by workspace name for consistent output
+        workspace_data.sort_by(|a, b| a.name.cmp(&b.name));
 
         let report = WorkspaceDepsJsonReport {
             workspaces: workspace_data,
@@ -418,13 +433,16 @@ impl WorkspaceDepsReportGenerator {
                 "direct"
             };
 
+            let mut sorted_deps: Vec<_> = deps.iter().cloned().collect();
+            sorted_deps.sort();
+
             writeln!(
                 output,
                 "::notice title={}::{} {} dependencies: {}",
                 workspace,
                 deps.len(),
                 dep_type,
-                deps.iter().cloned().collect::<Vec<_>>().join(", ")
+                sorted_deps.join(", ")
             )?;
         }
 

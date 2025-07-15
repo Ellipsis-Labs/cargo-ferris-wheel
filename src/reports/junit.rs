@@ -51,14 +51,27 @@ impl ReportGenerator for JunitReportGenerator {
                 detector.cycle_count()
             )?;
 
-            for (i, cycle) in detector.cycles().iter().enumerate() {
-                writeln!(
-                    output,
-                    "\nCycle {}: {}",
-                    i + 1,
-                    cycle.workspace_names().join(" → ")
-                )?;
-                for edge in cycle.edges() {
+            let mut sorted_cycles: Vec<_> = detector.cycles().iter().collect();
+            sorted_cycles.sort_by(|a, b| {
+                let a_names = a.workspace_names();
+                let b_names = b.workspace_names();
+                let a_first = a_names.first().map(|s| s.as_str()).unwrap_or("");
+                let b_first = b_names.first().map(|s| s.as_str()).unwrap_or("");
+                a_first.cmp(b_first)
+            });
+
+            for (i, cycle) in sorted_cycles.iter().enumerate() {
+                let mut workspace_names = cycle.workspace_names().to_vec();
+                workspace_names.sort();
+                writeln!(output, "\nCycle {}: {}", i + 1, workspace_names.join(" → "))?;
+
+                let mut sorted_edges = cycle.edges().to_vec();
+                sorted_edges.sort_by(|a, b| match a.from_crate().cmp(b.from_crate()) {
+                    std::cmp::Ordering::Equal => a.to_crate().cmp(b.to_crate()),
+                    other => other,
+                });
+
+                for edge in sorted_edges {
                     writeln!(
                         output,
                         "  {} → {} ({})",
