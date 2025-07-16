@@ -195,19 +195,19 @@ impl AffectedAnalysis {
             let abs_ws_path = abs_ws_path.canonicalize().unwrap_or(abs_ws_path);
 
             // Check if the Cargo file is directly in the workspace root
-            if let Some(parent) = abs_file.parent() {
-                if parent == abs_ws_path {
-                    // This is a workspace-level Cargo file
-                    // Mark all crates in this workspace as directly affected
-                    for ((crate_name, crate_path), crate_ws_path) in &self.crate_path_to_workspace {
-                        if crate_ws_path == ws_path {
-                            directly_affected_crates.insert(crate_name.clone());
-                            directly_affected_crate_paths
-                                .insert((crate_name.clone(), crate_path.clone()));
-                        }
+            if let Some(parent) = abs_file.parent()
+                && parent == abs_ws_path
+            {
+                // This is a workspace-level Cargo file
+                // Mark all crates in this workspace as directly affected
+                for ((crate_name, crate_path), crate_ws_path) in &self.crate_path_to_workspace {
+                    if crate_ws_path == ws_path {
+                        directly_affected_crates.insert(crate_name.clone());
+                        directly_affected_crate_paths
+                            .insert((crate_name.clone(), crate_path.clone()));
                     }
-                    return true;
                 }
+                return true;
             }
         }
         false
