@@ -1,15 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use miette::{Result, WrapErr};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use super::types::{DependencyEdge, DependencyType, WorkspaceNode};
-use crate::analyzer::{Dependency, DependencyBuilder, WorkspaceInfo};
+use crate::analyzer::{
+    CratePathToWorkspaceMap, CrateWorkspaceMap, Dependency, DependencyBuilder, WorkspaceInfo,
+};
 use crate::common::ConfigBuilder;
 use crate::dependency_filter::DependencyFilter;
 use crate::progress::ProgressReporter;
-use crate::toml_parser::CargoToml;
 
 /// Builder for constructing dependency graphs
 ///
@@ -19,8 +20,14 @@ pub struct DependencyGraphBuilder {
     graph: DiGraph<WorkspaceNode, DependencyEdge>,
     workspace_indices: HashMap<PathBuf, NodeIndex>,
     filter: DependencyFilter,
-    // Cache for resolved dependencies
-    workspace_dependencies_cache: HashMap<PathBuf, HashMap<String, PathBuf>>,
+}
+
+struct DependencyLookupContext<'a> {
+    crate_to_workspaces: &'a CrateWorkspaceMap,
+    crate_path_to_workspace: &'a CratePathToWorkspaceMap,
+    crate_to_paths: &'a HashMap<String, Vec<PathBuf>>,
+    current_workspace_path: &'a Path,
+    from_crate_path: &'a Path,
 }
 
 // Types are now imported from the types module
@@ -37,7 +44,6 @@ impl DependencyGraphBuilder {
             graph: DiGraph::new(),
             workspace_indices: HashMap::new(),
             filter: DependencyFilter::new(exclude_dev, exclude_build, exclude_target),
-            workspace_dependencies_cache: HashMap::new(),
         }
     }
 
@@ -171,10 +177,88 @@ impl DependencyGraphBuilder {
         Ok(())
     }
 
+    fn resolve_dependency_targets(
+        &self,
+        dep: &Dependency,
+        ctx: &DependencyLookupContext<'_>,
+    ) -> Vec<PathBuf> {
+        let mut targets = BTreeSet::new();
+
+        if let Some(dep_path) = dep.path() {
+            let base_path = if dep.is_workspace() {
+                ctx.current_workspace_path
+            } else {
+                ctx.from_crate_path
+            };
+
+            let absolute_path = if dep_path.is_absolute() {
+                dep_path.clone()
+            } else {
+                base_path.join(dep_path)
+            };
+
+            let canonical = absolute_path
+                .canonicalize()
+                .unwrap_or_else(|_| absolute_path.clone());
+
+            if let Some(ws_path) = ctx.crate_path_to_workspace.get(&canonical) {
+                targets.insert(ws_path.clone());
+            } else if let Some(ws_path) = ctx.crate_path_to_workspace.get(&absolute_path) {
+                targets.insert(ws_path.clone());
+            }
+
+            if targets.is_empty()
+                && let Some(candidate_paths) = ctx.crate_to_paths.get(dep.name())
+            {
+                for candidate in candidate_paths {
+                    let matches_candidate =
+                        canonical.starts_with(candidate) || candidate.starts_with(&canonical);
+
+                    if matches_candidate
+                        && let Some(ws) = ctx.crate_path_to_workspace.get(candidate)
+                    {
+                        targets.insert(ws.clone());
+                        continue;
+                    }
+
+                    if let Ok(candidate_canon) = candidate.canonicalize()
+                        && (canonical.starts_with(&candidate_canon)
+                            || candidate_canon.starts_with(&canonical))
+                        && let Some(ws) = ctx.crate_path_to_workspace.get(&candidate_canon)
+                    {
+                        targets.insert(ws.clone());
+                    }
+                }
+            }
+
+            if targets.is_empty() {
+                for (crate_path, ws_path) in ctx.crate_path_to_workspace.iter() {
+                    if canonical.starts_with(crate_path) || crate_path.starts_with(&canonical) {
+                        targets.insert(ws_path.clone());
+                    }
+                }
+            }
+        }
+
+        if targets.is_empty()
+            && let Some(workspaces) = ctx.crate_to_workspaces.get(dep.name())
+            && workspaces.len() == 1
+        {
+            targets.extend(workspaces.iter().cloned());
+        }
+
+        targets
+            .into_iter()
+            .filter(|path| path != ctx.current_workspace_path)
+            .collect()
+    }
+
     pub fn build_cross_workspace_graph(
         &mut self,
         workspaces: &HashMap<PathBuf, WorkspaceInfo>,
-        crate_to_workspace: &HashMap<String, PathBuf>,
+        crate_to_workspaces: &CrateWorkspaceMap,
+        crate_path_to_workspace: &CratePathToWorkspaceMap,
+        crate_to_paths: &HashMap<String, Vec<PathBuf>>,
         progress: Option<&ProgressReporter>,
     ) -> Result<()> {
         // First, create nodes for all workspaces
@@ -195,9 +279,6 @@ impl DependencyGraphBuilder {
             self.workspace_indices.insert(ws_path.clone(), idx);
         }
 
-        // Load workspace dependencies for each workspace
-        self.load_workspace_dependencies(workspaces)?;
-
         // Then, analyze dependencies and create edges
         for (ws_path, ws_info) in workspaces {
             if let Some(p) = progress {
@@ -208,6 +289,14 @@ impl DependencyGraphBuilder {
 
             // Check each crate in this workspace
             for member in ws_info.members() {
+                let lookup_ctx = DependencyLookupContext {
+                    crate_to_workspaces,
+                    crate_path_to_workspace,
+                    crate_to_paths,
+                    current_workspace_path: ws_path.as_path(),
+                    from_crate_path: member.path(),
+                };
+
                 // Process normal dependencies (always included)
                 for dep in member.dependencies() {
                     self.process_dependency(
@@ -215,8 +304,7 @@ impl DependencyGraphBuilder {
                         member.name(),
                         dep,
                         DependencyType::Normal,
-                        crate_to_workspace,
-                        ws_path,
+                        &lookup_ctx,
                     )
                     .wrap_err_with(|| {
                         format!(
@@ -235,8 +323,7 @@ impl DependencyGraphBuilder {
                             member.name(),
                             dep,
                             DependencyType::Dev,
-                            crate_to_workspace,
-                            ws_path,
+                            &lookup_ctx,
                         )
                         .wrap_err_with(|| {
                             format!(
@@ -256,8 +343,7 @@ impl DependencyGraphBuilder {
                             member.name(),
                             dep,
                             DependencyType::Build,
-                            crate_to_workspace,
-                            ws_path,
+                            &lookup_ctx,
                         )
                         .wrap_err_with(|| {
                             format!(
@@ -281,8 +367,7 @@ impl DependencyGraphBuilder {
                                 member.name(),
                                 &dep,
                                 DependencyType::Normal,
-                                crate_to_workspace,
-                                ws_path,
+                                &lookup_ctx,
                             )
                             .wrap_err_with(|| {
                                 format!(
@@ -302,32 +387,13 @@ impl DependencyGraphBuilder {
         Ok(())
     }
 
-    fn load_workspace_dependencies(
-        &mut self,
-        workspaces: &HashMap<PathBuf, WorkspaceInfo>,
-    ) -> Result<()> {
-        // For each workspace, load its workspace-level dependencies
-        for ws_path in workspaces.keys() {
-            let workspace_toml_path = ws_path.join("Cargo.toml");
-            if workspace_toml_path.exists()
-                && let Ok(cargo_toml) = CargoToml::parse_file(&workspace_toml_path)
-            {
-                let deps = cargo_toml.get_workspace_dependencies();
-                self.workspace_dependencies_cache
-                    .insert(ws_path.clone(), deps);
-            }
-        }
-        Ok(())
-    }
-
     fn process_dependency(
         &mut self,
         from_ws_idx: NodeIndex,
         from_crate: &str,
         dep: &Dependency,
         dep_type: DependencyType,
-        crate_to_workspace: &HashMap<String, PathBuf>,
-        current_workspace_path: &Path,
+        ctx: &DependencyLookupContext<'_>,
     ) -> Result<()> {
         // Skip if this specific dependency should be filtered out (e.g.,
         // target-specific)
@@ -335,62 +401,21 @@ impl DependencyGraphBuilder {
             return Ok(());
         }
 
-        // First check if this dependency directly maps to a known crate
-        if let Some(target_ws_path) = crate_to_workspace.get(dep.name()) {
-            // Get the target workspace index
-            if let Some(&to_ws_idx) = self.workspace_indices.get(target_ws_path) {
-                // Don't create self-edges (dependencies within the same workspace)
-                if from_ws_idx != to_ws_idx {
-                    // Check if edge already exists, if not create it
-                    let edge = DependencyEdge::builder()
-                        .with_from_crate(from_crate)
-                        .with_to_crate(dep.name())
-                        .with_dependency_type(dep_type)
-                        .with_target(dep.target().map(|t| t.to_string()))
-                        .build()
-                        .wrap_err("Failed to build DependencyEdge")?;
+        let target_workspaces = self.resolve_dependency_targets(dep, ctx);
 
-                    self.graph.add_edge(from_ws_idx, to_ws_idx, edge);
-                }
-            }
-        } else {
-            // If not found directly, it might be a workspace dependency
-            // Check if this workspace has a mapping for this dependency
-            if let Some(workspace_deps) = self
-                .workspace_dependencies_cache
-                .get(current_workspace_path)
-                && let Some(dep_path) = workspace_deps.get(dep.name())
+        for target_ws_path in target_workspaces {
+            if let Some(&to_ws_idx) = self.workspace_indices.get(&target_ws_path)
+                && from_ws_idx != to_ws_idx
             {
-                // This is a workspace dependency with a path
-                // Resolve the absolute path
-                let abs_dep_path = if dep_path.is_relative() {
-                    current_workspace_path.join(dep_path)
-                } else {
-                    dep_path.clone()
-                };
+                let edge = DependencyEdge::builder()
+                    .with_from_crate(from_crate)
+                    .with_to_crate(dep.name())
+                    .with_dependency_type(dep_type.clone())
+                    .with_target(dep.target().map(|t| t.to_string()))
+                    .build()
+                    .wrap_err("Failed to build DependencyEdge")?;
 
-                // Now check if this path maps to a known workspace
-                // We need to check if abs_dep_path is inside any workspace
-                for (crate_name, ws_path) in crate_to_workspace {
-                    // Check if the dependency path contains a crate from this workspace
-                    if (abs_dep_path
-                        .to_string_lossy()
-                        .contains(&crate_name.replace('-', "_"))
-                        || abs_dep_path.to_string_lossy().contains(crate_name))
-                        && let Some(&to_ws_idx) = self.workspace_indices.get(ws_path)
-                        && from_ws_idx != to_ws_idx
-                    {
-                        let edge = DependencyEdge::builder()
-                            .with_from_crate(from_crate)
-                            .with_to_crate(crate_name)
-                            .with_dependency_type(dep_type.clone())
-                            .with_target(dep.target().map(|t| t.to_string()))
-                            .build()
-                            .wrap_err("Failed to build DependencyEdge")?;
-                        self.graph.add_edge(from_ws_idx, to_ws_idx, edge);
-                        break;
-                    }
-                }
+                self.graph.add_edge(from_ws_idx, to_ws_idx, edge);
             }
         }
 
@@ -404,8 +429,15 @@ impl DependencyGraphBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use petgraph::visit::EdgeRef;
+    use tempfile::TempDir;
+
     use super::*;
-    use crate::analyzer::{CrateMember, WorkspaceInfo};
+    use crate::analyzer::{
+        CrateMember, CratePathToWorkspaceMap, CrateWorkspaceMap, WorkspaceAnalyzer, WorkspaceInfo,
+    };
 
     // Helper function for creating test CrateMember using the builder
     fn test_crate_member(
@@ -424,10 +456,14 @@ mod tests {
     #[test]
     fn test_build_simple_graph() {
         let mut workspaces = HashMap::new();
-        let mut crate_to_workspace = HashMap::new();
+        let mut crate_to_workspaces = CrateWorkspaceMap::new();
+        let mut crate_path_to_workspace = CratePathToWorkspaceMap::new();
+        let mut crate_to_paths: HashMap<String, Vec<PathBuf>> = HashMap::new();
 
         // Workspace A
         let ws_a_path = PathBuf::from("/test/workspace-a");
+        let crate_a_path = ws_a_path.join("crate-a");
+        let crate_b_path = PathBuf::from("/test/workspace-b/crate-b");
         workspaces.insert(
             ws_a_path.clone(),
             WorkspaceInfo::builder()
@@ -435,15 +471,30 @@ mod tests {
                 .with_members(vec![test_crate_member(
                     "crate-a",
                     &ws_a_path,
-                    vec![Dependency::builder().with_name("crate-b").build().unwrap()],
+                    vec![
+                        Dependency::builder()
+                            .with_name("crate-b")
+                            .with_path(crate_b_path.clone())
+                            .build()
+                            .unwrap(),
+                    ],
                 )])
                 .build()
                 .unwrap(),
         );
-        crate_to_workspace.insert("crate-a".to_string(), ws_a_path.clone());
+        crate_to_workspaces
+            .entry("crate-a".to_string())
+            .or_default()
+            .insert(ws_a_path.clone());
+        crate_path_to_workspace.insert(crate_a_path.clone(), ws_a_path.clone());
+        crate_to_paths
+            .entry("crate-a".to_string())
+            .or_default()
+            .push(crate_a_path);
 
         // Workspace B
         let ws_b_path = PathBuf::from("/test/workspace-b");
+        let ws_b_crate_path = ws_b_path.join("crate-b");
         workspaces.insert(
             ws_b_path.clone(),
             WorkspaceInfo::builder()
@@ -452,11 +503,25 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        crate_to_workspace.insert("crate-b".to_string(), ws_b_path.clone());
+        crate_to_workspaces
+            .entry("crate-b".to_string())
+            .or_default()
+            .insert(ws_b_path.clone());
+        crate_path_to_workspace.insert(ws_b_crate_path.clone(), ws_b_path.clone());
+        crate_to_paths
+            .entry("crate-b".to_string())
+            .or_default()
+            .push(ws_b_crate_path);
 
         let mut builder = DependencyGraphBuilder::new(false, false, false);
         builder
-            .build_cross_workspace_graph(&workspaces, &crate_to_workspace, None)
+            .build_cross_workspace_graph(
+                &workspaces,
+                &crate_to_workspaces,
+                &crate_path_to_workspace,
+                &crate_to_paths,
+                None,
+            )
             .unwrap();
 
         assert_eq!(builder.graph.node_count(), 2);
@@ -833,5 +898,71 @@ mod tests {
         assert!(node_names.contains(&"workspace-a/crate-a2".to_string()));
         assert!(node_names.contains(&"workspace-b/crate-b1".to_string()));
         assert!(node_names.contains(&"workspace-b/crate-b2".to_string()));
+    }
+
+    #[test]
+    fn test_workspace_dependency_resolution_with_custom_path() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        let ws_b_path = root.join("workspace-b");
+        fs::create_dir_all(ws_b_path.join("libs/tool/src")).unwrap();
+        fs::write(
+            ws_b_path.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"libs/tool\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            ws_b_path.join("libs/tool/Cargo.toml"),
+            "[package]\nname = \"custom-lib\"\n",
+        )
+        .unwrap();
+        fs::write(ws_b_path.join("libs/tool/src/lib.rs"), "pub fn tool() {}").unwrap();
+
+        let ws_a_path = root.join("workspace-a");
+        fs::create_dir_all(ws_a_path.join("consumer/src")).unwrap();
+        fs::write(
+            ws_a_path.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"consumer\"]\n\n[workspace.dependencies]\ncustom-lib = { \
+             path = \"../workspace-b/libs/tool\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            ws_a_path.join("consumer/Cargo.toml"),
+            "[package]\nname = \"consumer\"\n\n[dependencies]\ncustom-lib = { workspace = true }\n",
+        )
+        .unwrap();
+        fs::write(ws_a_path.join("consumer/src/lib.rs"), "pub fn consume() {}").unwrap();
+
+        let mut analyzer = WorkspaceAnalyzer::new();
+        analyzer
+            .discover_workspaces(&[root.to_path_buf()], None)
+            .unwrap();
+
+        let mut builder = DependencyGraphBuilder::new(false, false, false);
+        builder
+            .build_cross_workspace_graph(
+                analyzer.workspaces(),
+                analyzer.crate_to_workspace(),
+                analyzer.crate_path_to_workspace(),
+                analyzer.crate_to_paths(),
+                None,
+            )
+            .unwrap();
+
+        let matching_edges: Vec<_> = builder
+            .graph()
+            .edge_references()
+            .filter(|edge| edge.weight().to_crate() == "custom-lib")
+            .collect();
+
+        assert_eq!(matching_edges.len(), 1);
+
+        let edge = matching_edges[0];
+        let from_node = &builder.graph()[edge.source()];
+        let to_node = &builder.graph()[edge.target()];
+
+        assert_eq!(from_node.name(), "workspace-a");
+        assert_eq!(to_node.name(), "workspace-b");
     }
 }

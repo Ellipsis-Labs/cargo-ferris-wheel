@@ -177,7 +177,13 @@ fn test_readme_example_generation() {
     // Build dependency graph
     let mut graph_builder = DependencyGraphBuilder::new(false, false, false);
     graph_builder
-        .build_cross_workspace_graph(analyzer.workspaces(), analyzer.crate_to_workspace(), None)
+        .build_cross_workspace_graph(
+            analyzer.workspaces(),
+            analyzer.crate_to_workspace(),
+            analyzer.crate_path_to_workspace(),
+            analyzer.crate_to_paths(),
+            None,
+        )
         .unwrap();
 
     // Detect cycles

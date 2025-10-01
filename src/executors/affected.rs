@@ -43,6 +43,8 @@ impl CommandExecutor for AffectedExecutor {
             .build_cross_workspace_graph(
                 analyzer.workspaces(),
                 analyzer.crate_to_workspace(),
+                analyzer.crate_path_to_workspace(),
+                analyzer.crate_to_paths(),
                 progress.as_ref(),
             )
             .wrap_err("Failed to build cross-workspace dependency graph")?;
@@ -55,8 +57,7 @@ impl CommandExecutor for AffectedExecutor {
         );
         let affected_analysis = AffectedAnalysis::new(
             analyzer.workspaces(),
-            analyzer.crate_to_workspace(),
-            analyzer.crate_to_paths(),
+            analyzer.crate_path_to_workspace(),
             filter,
         )?;
 
@@ -94,6 +95,14 @@ fn generate_json_report(
         // For direct_only mode, use the to_json_report method but filter to only
         // directly affected
         let full_report = result.to_json_report(analysis);
+        let mut direct_crates: Vec<String> = result
+            .directly_affected_crates
+            .iter()
+            .map(|crate_id| crate_id.name().to_string())
+            .collect();
+        direct_crates.sort();
+        direct_crates.dedup();
+
         AffectedJsonReport {
             affected_crates: full_report
                 .affected_crates
@@ -105,7 +114,7 @@ fn generate_json_report(
                 .into_iter()
                 .filter(|ws| result.directly_affected_workspaces.contains(&ws.name))
                 .collect(),
-            directly_affected_crates: result.directly_affected_crates.iter().cloned().collect(),
+            directly_affected_crates: direct_crates,
             directly_affected_workspaces: full_report.directly_affected_workspaces,
         }
     } else {
@@ -136,10 +145,21 @@ fn generate_human_report(
             "  Crates: {}",
             result.directly_affected_crates.len()
         )?;
-        let mut sorted_crates: Vec<_> = result.directly_affected_crates.iter().collect();
-        sorted_crates.sort();
-        for crate_name in sorted_crates {
-            writeln!(output, "    - {crate_name}")?
+        let mut sorted_crates: Vec<_> = result
+            .directly_affected_crates
+            .iter()
+            .map(|crate_id| {
+                (
+                    analysis
+                        .workspace_name(crate_id)
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    crate_id.name().to_string(),
+                )
+            })
+            .collect();
+        sorted_crates.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        for (workspace, crate_name) in sorted_crates {
+            writeln!(output, "    - {} ({})", crate_name, workspace)?
         }
     }
     writeln!(
@@ -169,12 +189,22 @@ fn generate_human_report(
         )?;
         if config.show_crates {
             writeln!(output, "  Crates: {}", result.all_affected_crates.len())?;
-            let mut sorted_all_crates: Vec<_> = result.all_affected_crates.iter().collect();
-            sorted_all_crates.sort();
-            for crate_name in sorted_all_crates {
-                if !result.directly_affected_crates.contains(crate_name) {
-                    writeln!(output, "    - {crate_name} (indirect)")?
-                }
+            let mut sorted_all_crates: Vec<_> = result
+                .all_affected_crates
+                .iter()
+                .filter(|crate_id| !result.directly_affected_crates.contains(*crate_id))
+                .map(|crate_id| {
+                    (
+                        analysis
+                            .workspace_name(crate_id)
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        crate_id.name().to_string(),
+                    )
+                })
+                .collect();
+            sorted_all_crates.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+            for (workspace, crate_name) in sorted_all_crates {
+                writeln!(output, "    - {} ({})", crate_name, workspace)?;
             }
         }
         writeln!(

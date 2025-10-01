@@ -90,7 +90,18 @@ impl DependencyClassifier {
                 continue;
             }
 
-            if let Ok(dependency) = Self::create_dependency(&dep_name, &dep_type) {
+            let dependency_path = if CargoToml::is_workspace_dependency(&dep) {
+                workspace_deps.get(&dep_name).cloned()
+            } else {
+                CargoToml::extract_path(&dep).map(std::path::PathBuf::from)
+            };
+
+            if let Ok(dependency) = Self::create_dependency(
+                &dep_name,
+                &dep_type,
+                dependency_path,
+                CargoToml::is_workspace_dependency(&dep),
+            ) {
                 classifier.add_dependency(dependency, dep_type);
             }
         }
@@ -116,8 +127,16 @@ impl DependencyClassifier {
     fn create_dependency(
         dep_name: &str,
         dep_type: &TomlDependencyType,
+        path: Option<std::path::PathBuf>,
+        is_workspace: bool,
     ) -> Result<Dependency, DependencyBuilderError> {
-        let mut builder = Dependency::builder().with_name(dep_name);
+        let mut builder = Dependency::builder()
+            .with_name(dep_name)
+            .with_is_workspace(is_workspace);
+
+        if let Some(path) = path {
+            builder = builder.with_path(path);
+        }
 
         match dep_type {
             TomlDependencyType::Target(t)
@@ -177,9 +196,13 @@ mod tests {
 
     #[test]
     fn test_create_dependency_normal() {
-        let dep =
-            DependencyClassifier::create_dependency("test-crate", &TomlDependencyType::Normal)
-                .expect("Failed to create dependency");
+        let dep = DependencyClassifier::create_dependency(
+            "test-crate",
+            &TomlDependencyType::Normal,
+            None,
+            false,
+        )
+        .expect("Failed to create dependency");
         assert_eq!(dep.name(), "test-crate");
         assert!(dep.target().is_none());
     }
@@ -189,6 +212,8 @@ mod tests {
         let dep = DependencyClassifier::create_dependency(
             "test-crate",
             &TomlDependencyType::Target("wasm32-unknown-unknown".to_string()),
+            None,
+            false,
         )
         .expect("Failed to create dependency");
         assert_eq!(dep.name(), "test-crate");

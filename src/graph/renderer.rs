@@ -59,13 +59,11 @@ impl GraphRenderer {
         output: &mut dyn Write,
     ) -> Result<()> {
         if graph.node_count() == 0 {
-            writeln_out!(output, "No workspaces found to visualize")
-                .map_err(FerrisWheelError::from)?;
+            writeln_out!(output, "No workspaces found to visualize")?;
             return Ok(());
         }
 
-        writeln_out!(output, "\n📊 Workspace Dependency Graph\n")
-            .map_err(FerrisWheelError::from)?;
+        writeln_out!(output, "\n📊 Workspace Dependency Graph\n")?;
 
         // Build sets of workspace names involved in cycles for easy lookup
         let cycles_ws_names: Vec<Vec<String>> = cycles
@@ -88,20 +86,16 @@ impl GraphRenderer {
 
             // Print workspace header with cycle indicator
             if in_cycle && self.highlight_cycles {
-                writeln_out!(output, "┌─────────────────────────────────────┐")
-                    .map_err(FerrisWheelError::from)?;
-                writeln_out!(output, "│ {} ⚠️  IN CYCLE", ws_name)
-                    .map_err(FerrisWheelError::from)?;
-                writeln_out!(output, "└─────────────────────────────────────┘")
-                    .map_err(FerrisWheelError::from)?;
+                writeln_out!(output, "┌─────────────────────────────────────┐")?;
+                writeln_out!(output, "│ {} ⚠️  IN CYCLE", ws_name)?;
+                writeln_out!(output, "└─────────────────────────────────────┘")?;
             } else {
-                writeln_out!(output, "{}", ws_name).map_err(FerrisWheelError::from)?;
+                writeln_out!(output, "{}", ws_name)?;
             }
 
             // Show crates in this workspace if requested
             if self.show_crates && !node.crates().is_empty() {
-                writeln_out!(output, "  📦 Crates: {}", node.crates().join(", "))
-                    .map_err(FerrisWheelError::from)?;
+                writeln_out!(output, "  📦 Crates: {}", node.crates().join(", "))?;
             }
 
             // Aggregate edges by target and dependency type
@@ -115,8 +109,7 @@ impl GraphRenderer {
             }
 
             if edge_groups.is_empty() {
-                writeln_out!(output, "  └── (no cross-workspace dependencies)")
-                    .map_err(FerrisWheelError::from)?;
+                writeln_out!(output, "  └── (no cross-workspace dependencies)")?;
             } else {
                 // Sort groups by target workspace name and dependency type
                 let mut groups: Vec<_> = edge_groups.into_iter().collect();

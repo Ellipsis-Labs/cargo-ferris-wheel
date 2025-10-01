@@ -165,9 +165,11 @@ The `ripples` command is the star of our CI circus! This precision tool determin
 **What it does:**
 
 - Maps changed files to their containing crates
+- Canonicalizes crates by their manifest paths so duplicate package names stay unique across workspaces
 - Traces dependencies to find all affected components
 - Distinguishes between directly and indirectly affected crates
 - Provides both workspace and crate-level impact analysis
+- Resolves workspace dependencies via Cargo metadata rather than directory-name heuristics
 - Outputs machine-readable formats for CI integration
 
 **When to use it:**
@@ -182,7 +184,9 @@ The `ripples` command is the star of our CI circus! This precision tool determin
 Unlike naive approaches that rebuild everything or guess based on directory names, `ripples` understands your actual dependency graph. It precisely identifies affected components, even when:
 
 - Multiple crates exist in a single workspace
+- Different workspaces reuse the same crate name
 - Changes affect shared dependencies
+- Workspace directories diverge from their package names
 - File moves or renames occur
 - Only test files are modified
 

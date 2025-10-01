@@ -43,7 +43,13 @@ impl CommandExecutor for GraphExecutor {
             config.exclude_target,
         );
         graph_builder
-            .build_cross_workspace_graph(analyzer.workspaces(), analyzer.crate_to_workspace(), None)
+            .build_cross_workspace_graph(
+                analyzer.workspaces(),
+                analyzer.crate_to_workspace(),
+                analyzer.crate_path_to_workspace(),
+                analyzer.crate_to_paths(),
+                None,
+            )
             .wrap_err("Failed to build dependency graph")?;
 
         // Detect cycles if highlighting is requested
