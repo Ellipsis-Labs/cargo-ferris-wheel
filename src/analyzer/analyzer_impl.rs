@@ -731,9 +731,7 @@ members = ["shared"]
             assert!(expected_ws_paths.contains(&ws_abs));
             assert!(
                 resolved.starts_with(&ws_abs),
-                "crate {:?} should live under workspace {:?}",
-                resolved,
-                ws_abs
+                "crate {resolved:?} should live under workspace {ws_abs:?}"
             );
         }
     }

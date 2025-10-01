@@ -159,7 +159,7 @@ fn generate_human_report(
             .collect();
         sorted_crates.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
         for (workspace, crate_name) in sorted_crates {
-            writeln!(output, "    - {} ({})", crate_name, workspace)?
+            writeln!(output, "    - {crate_name} ({workspace})")?
         }
     }
     writeln!(
@@ -204,7 +204,7 @@ fn generate_human_report(
                 .collect();
             sorted_all_crates.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
             for (workspace, crate_name) in sorted_all_crates {
-                writeln!(output, "    - {} ({})", crate_name, workspace)?;
+                writeln!(output, "    - {crate_name} ({workspace})")?;
             }
         }
         writeln!(
