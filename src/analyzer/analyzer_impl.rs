@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use console::style;
@@ -29,13 +29,17 @@ pub enum CrateMemberBuilderError {
 }
 
 // Type aliases to reduce complexity
-type WorkspaceProcessResult = (PathBuf, WorkspaceInfo, Vec<(String, PathBuf)>);
+pub type CrateWorkspaceMap = HashMap<String, BTreeSet<PathBuf>>;
+pub type CratePathToWorkspaceMap = HashMap<PathBuf, PathBuf>;
+
+type WorkspaceProcessResult = (PathBuf, WorkspaceInfo);
 type ParallelProcessResults = Vec<WorkspaceProcessResult>;
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceAnalyzer {
     workspaces: HashMap<PathBuf, WorkspaceInfo>,
-    crate_to_workspace: HashMap<String, PathBuf>,
+    crate_to_workspaces: CrateWorkspaceMap,
+    crate_path_to_workspace: CratePathToWorkspaceMap,
     crate_to_paths: HashMap<String, Vec<PathBuf>>,
 }
 
@@ -226,6 +230,8 @@ impl CrateMemberBuilder {
 pub struct Dependency {
     name: String,
     target: Option<String>,
+    path: Option<PathBuf>,
+    is_workspace: bool,
 }
 
 impl Dependency {
@@ -240,12 +246,22 @@ impl Dependency {
     pub fn target(&self) -> Option<&str> {
         self.target.as_deref()
     }
+
+    pub fn path(&self) -> Option<&PathBuf> {
+        self.path.as_ref()
+    }
+
+    pub fn is_workspace(&self) -> bool {
+        self.is_workspace
+    }
 }
 
 #[derive(Default)]
 pub struct DependencyBuilder {
     name: Option<String>,
     target: Option<String>,
+    path: Option<PathBuf>,
+    is_workspace: bool,
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -263,6 +279,8 @@ impl From<&Dependency> for DependencyBuilder {
         Self {
             name: Some(dep.name().to_string()),
             target: dep.target().map(|t| t.to_string()),
+            path: dep.path().cloned(),
+            is_workspace: dep.is_workspace(),
         }
     }
 }
@@ -278,10 +296,22 @@ impl DependencyBuilder {
         self
     }
 
+    pub fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn with_is_workspace(mut self, is_workspace: bool) -> Self {
+        self.is_workspace = is_workspace;
+        self
+    }
+
     pub fn build(self) -> Result<Dependency, DependencyBuilderError> {
         Ok(Dependency {
             name: self.name.ok_or(DependencyBuilderError::MissingName)?,
             target: self.target,
+            path: self.path,
+            is_workspace: self.is_workspace,
         })
     }
 }
@@ -296,7 +326,8 @@ impl WorkspaceAnalyzer {
     pub fn new() -> Self {
         Self {
             workspaces: HashMap::new(),
-            crate_to_workspace: HashMap::new(),
+            crate_to_workspaces: HashMap::new(),
+            crate_path_to_workspace: HashMap::new(),
             crate_to_paths: HashMap::new(),
         }
     }
@@ -305,8 +336,12 @@ impl WorkspaceAnalyzer {
         &self.workspaces
     }
 
-    pub fn crate_to_workspace(&self) -> &HashMap<String, PathBuf> {
-        &self.crate_to_workspace
+    pub fn crate_to_workspace(&self) -> &CrateWorkspaceMap {
+        &self.crate_to_workspaces
+    }
+
+    pub fn crate_path_to_workspace(&self) -> &CratePathToWorkspaceMap {
+        &self.crate_path_to_workspace
     }
 
     pub fn crate_to_paths(&self) -> &HashMap<String, Vec<PathBuf>> {
@@ -395,19 +430,41 @@ impl WorkspaceAnalyzer {
     }
 
     fn merge_results(&mut self, results: ParallelProcessResults) {
-        for (path, info, crate_mappings) in results {
-            // Populate crate_to_paths mapping from the workspace info
-            for member in &info.members {
-                self.crate_to_paths
+        for (workspace_path, mut info) in results {
+            let workspace_key = workspace_path
+                .canonicalize()
+                .unwrap_or_else(|_| workspace_path.clone());
+
+            // Populate crate lookups from the workspace info
+            for member in &mut info.members {
+                let crate_path = member
+                    .path
+                    .canonicalize()
+                    .unwrap_or_else(|_| member.path.clone());
+
+                member.path = crate_path.clone();
+
+                if let Some(entry) = self.crate_to_paths.get_mut(&member.name) {
+                    if !entry.iter().any(|existing| existing == &crate_path) {
+                        entry.push(crate_path.clone());
+                    }
+                } else {
+                    self.crate_to_paths
+                        .entry(member.name.clone())
+                        .or_default()
+                        .push(crate_path.clone());
+                }
+
+                self.crate_to_workspaces
                     .entry(member.name.clone())
                     .or_default()
-                    .push(member.path.clone());
+                    .insert(workspace_key.clone());
+
+                self.crate_path_to_workspace
+                    .insert(crate_path, workspace_key.clone());
             }
 
-            self.workspaces.insert(path, info);
-            for (crate_name, workspace_path) in crate_mappings {
-                self.crate_to_workspace.insert(crate_name, workspace_path);
-            }
+            self.workspaces.insert(workspace_key, info);
         }
     }
 
@@ -445,7 +502,7 @@ impl WorkspaceAnalyzer {
         root: WorkspaceRoot,
     ) -> Result<WorkspaceProcessResult> {
         // Process members in parallel and collect both results and errors
-        let results: Vec<Result<(CrateMember, String)>> = root
+        let results: Vec<Result<CrateMember>> = root
             .members()
             .par_iter()
             .map(|member| {
@@ -456,18 +513,17 @@ impl WorkspaceAnalyzer {
                     root.workspace_dependencies(),
                     root.path(),
                 )
-                .map(|crate_member| (crate_member, member.name().to_string()))
                 .wrap_err_with(|| format!("Failed to analyze crate '{}'", member.name()))
             })
             .collect();
 
         // Separate successful results from errors
-        let mut members_with_mappings = Vec::new();
+        let mut members = Vec::new();
         let mut crate_errors = Vec::new();
 
         for result in results {
             match result {
-                Ok(data) => members_with_mappings.push(data),
+                Ok(member) => members.push(member),
                 Err(e) => crate_errors.push(e),
             }
         }
@@ -477,23 +533,13 @@ impl WorkspaceAnalyzer {
             eprintln!("{} {}", style("⚠").yellow(), error);
         }
 
-        let members: Vec<CrateMember> = members_with_mappings
-            .iter()
-            .map(|(m, _)| m.clone())
-            .collect();
-
-        let crate_mappings: Vec<(String, PathBuf)> = members_with_mappings
-            .into_iter()
-            .map(|(_, name)| (name, root.path().clone()))
-            .collect();
-
         let workspace_info = WorkspaceInfo {
             name: root.name().to_string(),
             members,
             is_standalone: root.is_standalone(),
         };
 
-        Ok((root.path().clone(), workspace_info, crate_mappings))
+        Ok((root.path().clone(), workspace_info))
     }
 
     fn analyze_crate_member(
@@ -520,7 +566,9 @@ impl WorkspaceAnalyzer {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fs;
+    use std::path::PathBuf;
 
     use tempfile::TempDir;
 
@@ -600,5 +648,91 @@ crate-a = { path = "../crate-a" }
         // Check crate-b dependencies
         let crate_b = ws.members.iter().find(|m| m.name == "crate-b").unwrap();
         assert_eq!(crate_b.dev_dependencies.len(), 1); // crate-a
+    }
+
+    #[test]
+    fn test_duplicate_crate_names_map_to_multiple_workspaces() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        let workspace_a = root.join("workspace-a");
+        let workspace_b = root.join("workspace-b");
+
+        fs::create_dir_all(workspace_a.join("shared/src")).unwrap();
+        fs::create_dir_all(workspace_b.join("shared/src")).unwrap();
+
+        fs::write(
+            workspace_a.join("Cargo.toml"),
+            r#"
+[workspace]
+members = ["shared"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            workspace_a.join("shared/Cargo.toml"),
+            "[package]\nname = \"shared\"\n",
+        )
+        .unwrap();
+        fs::write(workspace_a.join("shared/src/lib.rs"), "pub fn a() {}").unwrap();
+
+        fs::write(
+            workspace_b.join("Cargo.toml"),
+            r#"
+[workspace]
+members = ["shared"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            workspace_b.join("shared/Cargo.toml"),
+            "[package]\nname = \"shared\"\n",
+        )
+        .unwrap();
+        fs::write(workspace_b.join("shared/src/lib.rs"), "pub fn b() {}").unwrap();
+
+        let mut analyzer = WorkspaceAnalyzer::new();
+        analyzer
+            .discover_workspaces(&[root.to_path_buf()], None)
+            .unwrap();
+
+        let shared_entries = analyzer
+            .crate_to_workspace()
+            .get("shared")
+            .expect("shared crate should be indexed");
+
+        let expected_ws_paths: BTreeSet<PathBuf> = [
+            workspace_a.canonicalize().unwrap(),
+            workspace_b.canonicalize().unwrap(),
+        ]
+        .into_iter()
+        .collect();
+
+        let actual_ws_paths: BTreeSet<PathBuf> = shared_entries
+            .iter()
+            .map(|p| p.canonicalize().unwrap())
+            .collect();
+
+        assert_eq!(actual_ws_paths, expected_ws_paths);
+
+        let crate_paths = analyzer
+            .crate_to_paths()
+            .get("shared")
+            .expect("crate paths should be tracked");
+        assert_eq!(crate_paths.len(), 2);
+
+        for crate_path in crate_paths {
+            let resolved = crate_path.canonicalize().unwrap();
+            let ws = analyzer
+                .crate_path_to_workspace()
+                .get(crate_path)
+                .expect("crate path should map to workspace");
+            let ws_abs = ws.canonicalize().unwrap();
+            assert!(expected_ws_paths.contains(&ws_abs));
+            assert!(
+                resolved.starts_with(&ws_abs),
+                "crate {resolved:?} should live under workspace {ws_abs:?}"
+            );
+        }
     }
 }

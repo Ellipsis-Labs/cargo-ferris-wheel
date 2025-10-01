@@ -8,7 +8,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
 
-use crate::analyzer::WorkspaceInfo;
+use crate::analyzer::{CratePathToWorkspaceMap, Dependency, WorkspaceInfo};
 use crate::cli::Commands;
 use crate::common::FromCommand;
 use crate::config::AffectedConfig;
@@ -36,6 +36,26 @@ pub struct AffectedCrate {
     pub workspace: String,
     pub is_directly_affected: bool,
     pub is_standalone: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub(crate) struct CrateId {
+    name: String,
+    path: PathBuf,
+}
+
+impl CrateId {
+    fn new(name: String, path: PathBuf) -> Self {
+        Self { name, path }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 impl FromCommand for AffectedConfig {
@@ -82,17 +102,16 @@ pub fn execute_affected_command(command: Commands) -> Result<()> {
 
 /// Analysis of affected crates and workspaces based on changed files
 pub struct AffectedAnalysis {
-    /// Map from (crate_name, crate_path) to workspace path
-    crate_path_to_workspace: HashMap<(String, PathBuf), PathBuf>,
-    /// Map from crate name to crate paths (can have multiple paths per crate
-    /// name)
-    crate_to_paths: HashMap<String, Vec<PathBuf>>,
+    /// Map from crate identifier to its workspace path
+    crate_workspace_index: HashMap<CrateId, PathBuf>,
+    /// Map from crate path to crate identifier for quick lookup
+    crate_path_index: HashMap<PathBuf, CrateId>,
     /// Map from workspace path to workspace info
     workspaces: HashMap<PathBuf, WorkspaceInfo>,
-    /// Crate-level dependency graph
-    crate_graph: DiGraph<String, ()>,
-    /// Map from crate name to node index in the graph
-    crate_node_indices: HashMap<String, NodeIndex>,
+    /// Crate-level dependency graph keyed by crate identifier
+    crate_graph: DiGraph<CrateId, ()>,
+    /// Map from crate identifier to node index in the graph
+    crate_node_indices: HashMap<CrateId, NodeIndex>,
 }
 
 impl AffectedAnalysis {
@@ -102,75 +121,89 @@ impl AffectedAnalysis {
 
     pub fn new(
         workspaces: &HashMap<PathBuf, WorkspaceInfo>,
-        _crate_to_workspace: &HashMap<String, PathBuf>,
-        crate_to_paths: &HashMap<String, Vec<PathBuf>>,
+        crate_path_to_workspace: &CratePathToWorkspaceMap,
         filter: DependencyFilter,
     ) -> Result<Self, FerrisWheelError> {
         let mut crate_graph = DiGraph::new();
         let mut crate_node_indices = HashMap::new();
-        let mut crate_path_to_workspace = HashMap::new();
+        let mut crate_workspace_index = HashMap::new();
+        let mut crate_path_index = HashMap::new();
+        let mut crate_ids_by_name: HashMap<String, Vec<CrateId>> = HashMap::new();
 
         // First pass: create nodes for all crates and build proper mappings
         for (workspace_path, workspace_info) in workspaces {
+            let workspace_path = workspace_path.clone();
             for member in workspace_info.members() {
-                // Add node to graph
-                let node_idx = crate_graph.add_node(member.name().to_string());
-                crate_node_indices.insert(member.name().to_string(), node_idx);
+                let crate_path = member.path().to_path_buf();
+                let crate_id = CrateId::new(member.name().to_string(), crate_path.clone());
+                let node_idx = crate_graph.add_node(crate_id.clone());
+                crate_node_indices.insert(crate_id.clone(), node_idx);
 
-                // Map (crate_name, crate_path) to workspace
-                crate_path_to_workspace.insert(
-                    (member.name().to_string(), member.path().clone()),
-                    workspace_path.clone(),
+                crate_workspace_index.insert(
+                    crate_id.clone(),
+                    crate_path_to_workspace
+                        .get(&crate_path)
+                        .cloned()
+                        .unwrap_or_else(|| workspace_path.clone()),
                 );
+
+                crate_path_index.insert(crate_path.clone(), crate_id.clone());
+
+                crate_ids_by_name
+                    .entry(crate_id.name().to_string())
+                    .or_default()
+                    .push(crate_id);
             }
         }
 
         // Second pass: add edges based on dependencies
-        for workspace_info in workspaces.values() {
+        for (workspace_path, workspace_info) in workspaces {
             for member in workspace_info.members() {
-                if let Some(&from_idx) = crate_node_indices.get(member.name()) {
-                    // Add edges for all dependency types
-                    for dep in member.dependencies() {
-                        if let Some(&to_idx) = crate_node_indices.get(dep.name()) {
-                            crate_graph.add_edge(from_idx, to_idx, ());
-                        }
-                    }
+                let crate_path = member.path().to_path_buf();
+                let Some(from_id) = crate_path_index.get(&crate_path).cloned() else {
+                    continue;
+                };
+                let &from_idx = crate_node_indices
+                    .get(&from_id)
+                    .expect("crate node must exist for analyzed member");
 
-                    // Include dev dependencies unless excluded
-                    if filter.include_dev() {
-                        for dep in member.dev_dependencies() {
-                            if let Some(&to_idx) = crate_node_indices.get(dep.name()) {
-                                crate_graph.add_edge(from_idx, to_idx, ());
-                            }
-                        }
-                    }
+                let mut ctx = DependencyGraphContext {
+                    crate_graph: &mut crate_graph,
+                    crate_node_indices: &crate_node_indices,
+                    crate_ids_by_name: &crate_ids_by_name,
+                    crate_path_index: &crate_path_index,
+                    workspace_path: workspace_path.as_path(),
+                };
 
-                    // Include build dependencies unless excluded
-                    if filter.include_build() {
-                        for dep in member.build_dependencies() {
-                            if let Some(&to_idx) = crate_node_indices.get(dep.name()) {
-                                crate_graph.add_edge(from_idx, to_idx, ());
-                            }
-                        }
-                    }
+                connect_dependencies(member.dependencies(), true, from_idx, &from_id, &mut ctx);
 
-                    // Include target-specific dependencies unless excluded
-                    if filter.include_target() {
-                        for target_deps in member.target_dependencies().values() {
-                            for dep in target_deps {
-                                if let Some(&to_idx) = crate_node_indices.get(dep.name()) {
-                                    crate_graph.add_edge(from_idx, to_idx, ());
-                                }
-                            }
-                        }
+                connect_dependencies(
+                    member.dev_dependencies(),
+                    filter.include_dev(),
+                    from_idx,
+                    &from_id,
+                    &mut ctx,
+                );
+
+                connect_dependencies(
+                    member.build_dependencies(),
+                    filter.include_build(),
+                    from_idx,
+                    &from_id,
+                    &mut ctx,
+                );
+
+                if filter.include_target() {
+                    for deps in member.target_dependencies().values() {
+                        connect_dependencies(deps, true, from_idx, &from_id, &mut ctx);
                     }
                 }
             }
         }
 
         Ok(Self {
-            crate_path_to_workspace,
-            crate_to_paths: crate_to_paths.clone(),
+            crate_workspace_index,
+            crate_path_index,
             workspaces: workspaces.clone(),
             crate_graph,
             crate_node_indices,
@@ -182,8 +215,7 @@ impl AffectedAnalysis {
         &self,
         abs_file: &Path,
         cwd: &Path,
-        directly_affected_crates: &mut HashSet<String>,
-        directly_affected_crate_paths: &mut HashSet<(String, PathBuf)>,
+        directly_affected_crates: &mut HashSet<CrateId>,
     ) -> bool {
         // Check if this file is at a workspace root
         for ws_path in self.workspaces.keys() {
@@ -200,11 +232,12 @@ impl AffectedAnalysis {
             {
                 // This is a workspace-level Cargo file
                 // Mark all crates in this workspace as directly affected
-                for ((crate_name, crate_path), crate_ws_path) in &self.crate_path_to_workspace {
-                    if crate_ws_path == ws_path {
-                        directly_affected_crates.insert(crate_name.clone());
-                        directly_affected_crate_paths
-                            .insert((crate_name.clone(), crate_path.clone()));
+                for (crate_id, crate_ws_path) in &self.crate_workspace_index {
+                    let crate_ws_abs = crate_ws_path
+                        .canonicalize()
+                        .unwrap_or_else(|_| crate_ws_path.clone());
+                    if crate_ws_abs == abs_ws_path {
+                        directly_affected_crates.insert(crate_id.clone());
                     }
                 }
                 return true;
@@ -215,8 +248,7 @@ impl AffectedAnalysis {
 
     /// Analyze which crates and workspaces are affected by the given files
     pub fn analyze_affected_files(&self, files: &[String]) -> AffectedResult {
-        let mut directly_affected_crates = HashSet::new();
-        let mut directly_affected_crate_paths = HashSet::new();
+        let mut directly_affected_crates: HashSet<CrateId> = HashSet::new();
         let mut unmatched_files = Vec::new();
 
         // Get current directory once for efficiency
@@ -232,7 +264,6 @@ impl AffectedAnalysis {
             } else {
                 cwd.join(&file_path)
             };
-            // Try to canonicalize to resolve symlinks (e.g., /private/var -> /var on macOS)
             let abs_file = abs_file.canonicalize().unwrap_or(abs_file);
 
             // Check if this is a Cargo.lock or Cargo.toml file
@@ -241,53 +272,13 @@ impl AffectedAnalysis {
 
             // Handle workspace-level Cargo files
             if is_cargo_file
-                && self.handle_workspace_cargo_file(
-                    &abs_file,
-                    &cwd,
-                    &mut directly_affected_crates,
-                    &mut directly_affected_crate_paths,
-                )
+                && self.handle_workspace_cargo_file(&abs_file, &cwd, &mut directly_affected_crates)
             {
                 continue;
             }
 
-            // Try to find by checking if file is under any crate directory
-            // When multiple crates match, prefer the one with the longest matching path
-            let mut best_match: Option<(String, PathBuf, usize)> = None;
-
-            for (crate_name, crate_paths) in &self.crate_to_paths {
-                for crate_path in crate_paths {
-                    // Normalize the crate path to absolute and resolve symlinks
-                    let abs_crate = if crate_path.is_absolute() {
-                        crate_path.clone()
-                    } else {
-                        cwd.join(crate_path)
-                    };
-                    // Try to canonicalize to resolve symlinks
-                    let abs_crate = abs_crate.canonicalize().unwrap_or(abs_crate);
-
-                    // Check if the file is under this crate's directory
-                    if abs_file.starts_with(&abs_crate) {
-                        let match_len = abs_crate.as_os_str().len();
-                        match &best_match {
-                            None => {
-                                best_match =
-                                    Some((crate_name.clone(), crate_path.clone(), match_len))
-                            }
-                            Some((_, _, best_len)) => {
-                                if match_len > *best_len {
-                                    best_match =
-                                        Some((crate_name.clone(), crate_path.clone(), match_len));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some((crate_name, crate_path, _)) = best_match {
-                directly_affected_crates.insert(crate_name.clone());
-                directly_affected_crate_paths.insert((crate_name, crate_path));
+            if let Some(crate_id) = self.find_crate_for_file(&abs_file) {
+                directly_affected_crates.insert(crate_id);
             } else {
                 unmatched_files.push(file.clone());
             }
@@ -295,45 +286,20 @@ impl AffectedAnalysis {
 
         // Find all crates affected by reverse dependencies
         let mut all_affected_crates = directly_affected_crates.clone();
-        for crate_name in &directly_affected_crates {
-            if let Some(&node_idx) = self.crate_node_indices.get(crate_name) {
+        for crate_id in directly_affected_crates.iter() {
+            if let Some(&node_idx) = self.crate_node_indices.get(crate_id) {
                 self.find_reverse_dependencies(node_idx, &mut all_affected_crates);
             }
         }
 
-        // Map directly affected crates to workspaces using the exact paths that were
-        // matched
-        let directly_affected_workspaces: HashSet<String> = directly_affected_crate_paths
+        let directly_affected_workspaces: HashSet<String> = directly_affected_crates
             .iter()
-            .filter_map(|(crate_name, crate_path)| {
-                self.crate_path_to_workspace
-                    .get(&(crate_name.clone(), crate_path.clone()))
-                    .and_then(|ws_path| self.workspaces.get(ws_path))
-                    .map(|ws_info| ws_info.name().to_string())
-            })
+            .filter_map(|crate_id| self.workspace_name(crate_id))
             .collect();
 
-        // For all affected crates (including reverse dependencies), we need to find
-        // their workspaces
         let all_affected_workspaces: HashSet<String> = all_affected_crates
             .iter()
-            .flat_map(|crate_name| {
-                // A crate might exist in multiple workspaces, so collect all of them
-                self.crate_to_paths
-                    .get(crate_name)
-                    .map(|paths| {
-                        paths
-                            .iter()
-                            .filter_map(|path| {
-                                self.crate_path_to_workspace
-                                    .get(&(crate_name.clone(), path.clone()))
-                                    .and_then(|ws_path| self.workspaces.get(ws_path))
-                                    .map(|ws_info| ws_info.name().to_string())
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default()
-            })
+            .filter_map(|crate_id| self.workspace_name(crate_id))
             .collect();
 
         AffectedResult {
@@ -345,7 +311,7 @@ impl AffectedAnalysis {
         }
     }
 
-    fn find_reverse_dependencies(&self, node_idx: NodeIndex, affected: &mut HashSet<String>) {
+    fn find_reverse_dependencies(&self, node_idx: NodeIndex, affected: &mut HashSet<CrateId>) {
         use petgraph::Direction;
 
         for edge in self
@@ -353,54 +319,169 @@ impl AffectedAnalysis {
             .edges_directed(node_idx, Direction::Incoming)
         {
             let source_idx = edge.source();
-            let source_crate = &self.crate_graph[source_idx];
+            let source_crate = self.crate_graph[source_idx].clone();
             if affected.insert(source_crate.clone()) {
                 // Recursively find more reverse dependencies
                 self.find_reverse_dependencies(source_idx, affected);
             }
         }
     }
+
+    fn find_crate_for_file(&self, abs_file: &Path) -> Option<CrateId> {
+        let canonical = abs_file
+            .canonicalize()
+            .unwrap_or_else(|_| abs_file.to_path_buf());
+
+        let mut best_match: Option<(usize, CrateId)> = None;
+
+        for (crate_path, crate_id) in &self.crate_path_index {
+            let match_path = (canonical.starts_with(crate_path)
+                || abs_file.starts_with(crate_path))
+            .then_some(crate_path);
+
+            if let Some(path) = match_path {
+                let match_len = path.components().count();
+                match &best_match {
+                    None => best_match = Some((match_len, crate_id.clone())),
+                    Some((best_len, _)) if match_len > *best_len => {
+                        best_match = Some((match_len, crate_id.clone()))
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        best_match.map(|(_, id)| id)
+    }
+
+    pub(crate) fn workspace_name(&self, crate_id: &CrateId) -> Option<String> {
+        self.crate_workspace_index
+            .get(crate_id)
+            .and_then(|ws_path| self.workspaces.get(ws_path))
+            .map(|ws| ws.name().to_string())
+    }
+}
+
+struct DependencyGraphContext<'a> {
+    crate_graph: &'a mut DiGraph<CrateId, ()>,
+    crate_node_indices: &'a HashMap<CrateId, NodeIndex>,
+    crate_ids_by_name: &'a HashMap<String, Vec<CrateId>>,
+    crate_path_index: &'a HashMap<PathBuf, CrateId>,
+    workspace_path: &'a Path,
+}
+
+fn connect_dependencies(
+    deps: &[Dependency],
+    include: bool,
+    from_idx: NodeIndex,
+    from_id: &CrateId,
+    ctx: &mut DependencyGraphContext<'_>,
+) {
+    if !include {
+        return;
+    }
+
+    for dep in deps {
+        if let Some(to_idx) = resolve_dependency_crate_id(
+            dep,
+            from_id,
+            ctx.workspace_path,
+            ctx.crate_ids_by_name,
+            ctx.crate_path_index,
+        )
+        .and_then(|target_id| ctx.crate_node_indices.get(&target_id).copied())
+        {
+            ctx.crate_graph.add_edge(from_idx, to_idx, ());
+        }
+    }
+}
+
+fn resolve_dependency_crate_id(
+    dep: &Dependency,
+    from_id: &CrateId,
+    workspace_path: &Path,
+    crate_ids_by_name: &HashMap<String, Vec<CrateId>>,
+    crate_path_index: &HashMap<PathBuf, CrateId>,
+) -> Option<CrateId> {
+    if let Some(dep_path) = dep.path() {
+        let base = if dep.is_workspace() {
+            workspace_path
+        } else {
+            from_id.path()
+        };
+
+        let absolute = if dep_path.is_absolute() {
+            dep_path.clone()
+        } else {
+            base.join(dep_path)
+        };
+
+        let canonical = absolute.canonicalize().unwrap_or_else(|_| absolute.clone());
+
+        crate_path_index
+            .get(&canonical)
+            .or_else(|| crate_path_index.get(&absolute))
+            .cloned()
+            .or_else(|| {
+                crate_path_index
+                    .iter()
+                    .find_map(|(candidate_path, candidate_id)| {
+                        if canonical.starts_with(candidate_path)
+                            || candidate_path.starts_with(&canonical)
+                        {
+                            Some(candidate_id.clone())
+                        } else {
+                            None
+                        }
+                    })
+            })
+    } else {
+        crate_ids_by_name.get(dep.name()).and_then(|ids| {
+            if ids.len() == 1 {
+                Some(ids[0].clone())
+            } else {
+                None
+            }
+        })
+    }
 }
 
 pub struct AffectedResult {
-    pub directly_affected_crates: HashSet<String>,
-    pub all_affected_crates: HashSet<String>,
-    pub directly_affected_workspaces: HashSet<String>,
-    pub all_affected_workspaces: HashSet<String>,
-    pub unmatched_files: Vec<String>,
+    pub(crate) directly_affected_crates: HashSet<CrateId>,
+    pub(crate) all_affected_crates: HashSet<CrateId>,
+    pub(crate) directly_affected_workspaces: HashSet<String>,
+    pub(crate) all_affected_workspaces: HashSet<String>,
+    pub(crate) unmatched_files: Vec<String>,
 }
 
 impl AffectedResult {
     pub fn to_json_report(&self, analysis: &AffectedAnalysis) -> AffectedJsonReport {
         let mut affected_crates = Vec::new();
 
-        for crate_name in &self.all_affected_crates {
-            // Get workspace info for this crate (prefer first path found)
+        for crate_id in &self.all_affected_crates {
             let workspace_info = analysis
-                .crate_to_paths
-                .get(crate_name)
-                .and_then(|paths| paths.first())
-                .and_then(|path| {
-                    analysis
-                        .crate_path_to_workspace
-                        .get(&(crate_name.clone(), path.clone()))
-                        .and_then(|ws_path| analysis.workspaces.get(ws_path))
-                });
+                .crate_workspace_index
+                .get(crate_id)
+                .and_then(|ws_path| analysis.workspaces.get(ws_path));
 
             let (workspace_name, is_standalone) = workspace_info
                 .map(|ws| (ws.name().to_string(), ws.is_standalone()))
                 .unwrap_or_else(|| ("unknown".to_string(), false));
 
             affected_crates.push(AffectedCrate {
-                name: crate_name.clone(),
+                name: crate_id.name().to_string(),
                 workspace: workspace_name,
-                is_directly_affected: self.directly_affected_crates.contains(crate_name),
+                is_directly_affected: self.directly_affected_crates.contains(crate_id),
                 is_standalone,
             });
         }
 
         // Sort affected crates by name for deterministic output
-        affected_crates.sort_by(|a, b| a.name.cmp(&b.name));
+        affected_crates.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.workspace.cmp(&b.workspace))
+        });
 
         // Create affected workspace objects with paths
         let mut affected_workspaces: Vec<AffectedWorkspace> = self
@@ -423,9 +504,13 @@ impl AffectedResult {
             .collect();
         affected_workspaces.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut directly_affected_crates: Vec<String> =
-            self.directly_affected_crates.iter().cloned().collect();
+        let mut directly_affected_crates: Vec<String> = self
+            .directly_affected_crates
+            .iter()
+            .map(|crate_id| crate_id.name().to_string())
+            .collect();
         directly_affected_crates.sort();
+        directly_affected_crates.dedup();
 
         let mut directly_affected_workspaces: Vec<AffectedWorkspace> = self
             .directly_affected_workspaces
@@ -464,6 +549,14 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    fn contains_crate(crates: &HashSet<CrateId>, name: &str) -> bool {
+        crates.iter().any(|id| id.name() == name)
+    }
+
+    fn count_crate(crates: &HashSet<CrateId>, name: &str) -> usize {
+        crates.iter().filter(|id| id.name() == name).count()
+    }
 
     fn create_test_workspace_with_duplicates() -> TempDir {
         let temp = TempDir::new().unwrap();
@@ -653,8 +746,7 @@ version = "0.1.0"
 
         AffectedAnalysis::new(
             analyzer.workspaces(),
-            analyzer.crate_to_workspace(),
-            analyzer.crate_to_paths(),
+            analyzer.crate_path_to_workspace(),
             crate::dependency_filter::DependencyFilter::default(),
         )
         .unwrap()
@@ -672,7 +764,14 @@ version = "0.1.0"
         )];
         let result_a = analysis.analyze_affected_files(&files_a);
 
-        assert!(result_a.directly_affected_crates.contains("phoenix-v2-api"));
+        assert!(contains_crate(
+            &result_a.directly_affected_crates,
+            "phoenix-v2-api"
+        ));
+        assert_eq!(
+            count_crate(&result_a.directly_affected_crates, "phoenix-v2-api"),
+            1
+        );
         assert!(
             result_a
                 .directly_affected_workspaces
@@ -691,7 +790,14 @@ version = "0.1.0"
         )];
         let result_b = analysis.analyze_affected_files(&files_b);
 
-        assert!(result_b.directly_affected_crates.contains("phoenix-v2-api"));
+        assert!(contains_crate(
+            &result_b.directly_affected_crates,
+            "phoenix-v2-api"
+        ));
+        assert_eq!(
+            count_crate(&result_b.directly_affected_crates, "phoenix-v2-api"),
+            1
+        );
         assert!(
             result_b
                 .directly_affected_workspaces
@@ -702,6 +808,32 @@ version = "0.1.0"
                 .directly_affected_workspaces
                 .contains("workspace-a")
         );
+    }
+
+    #[test]
+    fn test_duplicate_crate_names_multiple_changes() {
+        let temp = create_test_workspace_with_duplicates();
+        let analysis = build_test_analysis(temp.path());
+
+        let files = vec![
+            format!(
+                "{}/workspace-a/phoenix-v2-api/src/lib.rs",
+                temp.path().display()
+            ),
+            format!(
+                "{}/workspace-b/phoenix-v2-api/src/main.rs",
+                temp.path().display()
+            ),
+        ];
+
+        let result = analysis.analyze_affected_files(&files);
+
+        assert_eq!(
+            count_crate(&result.directly_affected_crates, "phoenix-v2-api"),
+            2
+        );
+        assert!(result.directly_affected_workspaces.contains("workspace-a"));
+        assert!(result.directly_affected_workspaces.contains("workspace-b"));
     }
 
     #[test]
@@ -717,12 +849,12 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // crate-b should be directly affected
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
         assert_eq!(result.directly_affected_crates.len(), 1);
 
         // crate-a should be affected via reverse dependency
-        assert!(result.all_affected_crates.contains("crate-a"));
-        assert!(result.all_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.all_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.all_affected_crates, "crate-b"));
         assert_eq!(result.all_affected_crates.len(), 2);
     }
 
@@ -756,7 +888,7 @@ version = "0.1.0"
         let files = vec!["my-workspace/crate-a/src/lib.rs".to_string()];
         let result = analysis.analyze_affected_files(&files);
 
-        assert!(result.directly_affected_crates.contains("crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
 
         // Restore original directory
         std::env::set_current_dir(original_dir).unwrap();
@@ -811,7 +943,7 @@ version = "0.1.0"
 
         // Should only count crate-a once
         assert_eq!(result.directly_affected_crates.len(), 1);
-        assert!(result.directly_affected_crates.contains("crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
     }
 
     #[test]
@@ -827,7 +959,10 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // Only consumer-crate should be directly affected
-        assert!(result.directly_affected_crates.contains("consumer-crate"));
+        assert!(contains_crate(
+            &result.directly_affected_crates,
+            "consumer-crate"
+        ));
 
         // Workspace B should be affected
         assert!(result.directly_affected_workspaces.contains("workspace-b"));
@@ -1150,8 +1285,8 @@ version = "0.1.0"
 
         // Both crates should be directly affected by their Cargo.toml files
         assert_eq!(result.directly_affected_crates.len(), 2);
-        assert!(result.directly_affected_crates.contains("crate-a"));
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
 
         // The workspace should be affected
         assert!(result.directly_affected_workspaces.contains("my-workspace"));
@@ -1168,8 +1303,8 @@ version = "0.1.0"
 
         // Workspace Cargo.toml should affect all workspace members
         assert_eq!(result.directly_affected_crates.len(), 2);
-        assert!(result.directly_affected_crates.contains("crate-a"));
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
         assert!(result.directly_affected_workspaces.contains("my-workspace"));
         assert!(result.unmatched_files.is_empty());
     }
@@ -1187,15 +1322,14 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // Standalone crate's Cargo.lock should map to the crate
-        assert!(
-            result
-                .directly_affected_crates
-                .contains("standalone-test-crate")
-        );
+        assert!(contains_crate(
+            &result.directly_affected_crates,
+            "standalone-test-crate",
+        ));
 
         // Workspace Cargo.lock should affect all workspace members
-        assert!(result.directly_affected_crates.contains("crate-a"));
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
 
         // No unmatched files
         assert!(result.unmatched_files.is_empty());
@@ -1211,8 +1345,8 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // All workspace members should be directly affected
-        assert!(result.directly_affected_crates.contains("crate-a"));
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
         assert_eq!(result.directly_affected_crates.len(), 2);
 
         // The workspace should be affected
@@ -1232,8 +1366,8 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // All workspace members should be directly affected
-        assert!(result.directly_affected_crates.contains("crate-a"));
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
         assert_eq!(result.directly_affected_crates.len(), 2);
 
         // The workspace should be affected
@@ -1256,16 +1390,15 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // Only the standalone crate should be affected
-        assert!(
-            result
-                .directly_affected_crates
-                .contains("standalone-test-crate")
-        );
+        assert!(contains_crate(
+            &result.directly_affected_crates,
+            "standalone-test-crate",
+        ));
         assert_eq!(result.directly_affected_crates.len(), 1);
 
         // No workspace members should be affected
-        assert!(!result.directly_affected_crates.contains("crate-a"));
-        assert!(!result.directly_affected_crates.contains("crate-b"));
+        assert!(!contains_crate(&result.directly_affected_crates, "crate-a"));
+        assert!(!contains_crate(&result.directly_affected_crates, "crate-b"));
 
         // No unmatched files
         assert!(result.unmatched_files.is_empty());
@@ -1284,13 +1417,13 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // crate-b should be directly affected
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
         assert_eq!(result.directly_affected_crates.len(), 1);
 
         // crate-a depends on crate-b, so it should be affected through reverse
         // dependencies
-        assert!(result.all_affected_crates.contains("crate-a"));
-        assert!(result.all_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.all_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.all_affected_crates, "crate-b"));
         assert_eq!(result.all_affected_crates.len(), 2);
     }
 
@@ -1308,8 +1441,8 @@ version = "0.1.0"
         let result = analysis.analyze_affected_files(&files);
 
         // All crates should be directly affected
-        assert!(result.directly_affected_crates.contains("crate-a"));
-        assert!(result.directly_affected_crates.contains("crate-b"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-a"));
+        assert!(contains_crate(&result.directly_affected_crates, "crate-b"));
         assert_eq!(result.directly_affected_crates.len(), 2);
 
         // No unmatched files
@@ -1410,9 +1543,18 @@ name = "outer-crate"
         )];
         let result = analysis.analyze_affected_files(&files);
 
-        assert!(result.directly_affected_crates.contains("inner-crate-a"));
-        assert!(result.directly_affected_crates.contains("inner-crate-b"));
-        assert!(!result.directly_affected_crates.contains("outer-crate"));
+        assert!(contains_crate(
+            &result.directly_affected_crates,
+            "inner-crate-a"
+        ));
+        assert!(contains_crate(
+            &result.directly_affected_crates,
+            "inner-crate-b"
+        ));
+        assert!(!contains_crate(
+            &result.directly_affected_crates,
+            "outer-crate"
+        ));
         assert_eq!(result.directly_affected_crates.len(), 2);
     }
 }

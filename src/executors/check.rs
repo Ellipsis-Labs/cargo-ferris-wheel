@@ -96,6 +96,8 @@ impl CommandExecutor for CheckExecutor {
                 .build_cross_workspace_graph(
                     analyzer.workspaces(),
                     analyzer.crate_to_workspace(),
+                    analyzer.crate_path_to_workspace(),
+                    analyzer.crate_to_paths(),
                     progress.as_ref(),
                 )
                 .wrap_err("Failed to build cross-workspace dependency graph")?;

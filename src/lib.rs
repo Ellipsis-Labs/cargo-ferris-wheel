@@ -43,6 +43,8 @@
 //! graph_builder.build_cross_workspace_graph(
 //!     analyzer.workspaces(),
 //!     analyzer.crate_to_workspace(),
+//!     analyzer.crate_path_to_workspace(),
+//!     analyzer.crate_to_paths(),
 //!     None, // no progress reporter
 //! )?;
 //!
@@ -93,6 +95,8 @@
 //! # graph_builder.build_cross_workspace_graph(
 //! #     analyzer.workspaces(),
 //! #     analyzer.crate_to_workspace(),
+//! #     analyzer.crate_path_to_workspace(),
+//! #     analyzer.crate_to_paths(),
 //! #     None,
 //! # )?;
 //! # let mut detector = CycleDetector::new();
@@ -144,6 +148,8 @@
 //! graph_builder.build_cross_workspace_graph(
 //!     analyzer.workspaces(),
 //!     analyzer.crate_to_workspace(),
+//!     analyzer.crate_path_to_workspace(),
+//!     analyzer.crate_to_paths(),
 //!     None,
 //! )?;
 //!
@@ -171,6 +177,8 @@
 //! # graph_builder.build_cross_workspace_graph(
 //! #     analyzer.workspaces(),
 //! #     analyzer.crate_to_workspace(),
+//! #     analyzer.crate_path_to_workspace(),
+//! #     analyzer.crate_to_paths(),
 //! #     None,
 //! # )?;
 //! # let mut detector = CycleDetector::new();

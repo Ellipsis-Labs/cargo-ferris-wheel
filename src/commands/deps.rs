@@ -9,7 +9,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
 use serde::{Deserialize, Serialize};
 
-use crate::analyzer::WorkspaceInfo;
+use crate::analyzer::{CrateWorkspaceMap, WorkspaceInfo};
 use crate::cli::Commands;
 use crate::common::{ConfigBuilder, FromCommand};
 use crate::config::WorkspaceDepsConfig;
@@ -85,7 +85,7 @@ pub struct WorkspaceDependencyAnalysis {
 impl WorkspaceDependencyAnalysis {
     pub fn new(
         workspaces: &HashMap<PathBuf, WorkspaceInfo>,
-        _crate_to_workspace: &HashMap<String, PathBuf>,
+        _crate_to_workspace: &CrateWorkspaceMap,
         graph: &DiGraph<WorkspaceNode, DependencyEdge>,
     ) -> Self {
         // Build node index lookup
@@ -458,17 +458,17 @@ mod tests {
     use petgraph::graph::DiGraph;
 
     use super::*;
-    use crate::analyzer::WorkspaceInfo;
+    use crate::analyzer::{CrateWorkspaceMap, WorkspaceInfo};
     use crate::graph::{DependencyEdge, WorkspaceNode};
 
     fn create_test_graph() -> (
         DiGraph<WorkspaceNode, DependencyEdge>,
         HashMap<PathBuf, WorkspaceInfo>,
-        HashMap<String, PathBuf>,
+        CrateWorkspaceMap,
     ) {
         let mut graph = DiGraph::new();
         let mut workspaces = HashMap::new();
-        let crate_to_workspace = HashMap::new();
+        let crate_to_workspace = CrateWorkspaceMap::new();
 
         // Create workspace nodes
         let node_a = graph.add_node(

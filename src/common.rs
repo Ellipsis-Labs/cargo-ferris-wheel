@@ -96,7 +96,7 @@ mod tests {
         let paths = args.get_paths();
         assert_eq!(paths.len(), 1);
         // Should default to current directory
-        assert!(paths[0].is_absolute() || paths[0] == PathBuf::from("."));
+        assert!(paths[0].is_absolute() || paths[0] == std::path::Path::new("."));
     }
 
     #[test]
