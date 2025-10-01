@@ -134,10 +134,7 @@ impl AffectedAnalysis {
         for (workspace_path, workspace_info) in workspaces {
             let workspace_path = workspace_path.clone();
             for member in workspace_info.members() {
-                let crate_path = member
-                    .path()
-                    .canonicalize()
-                    .unwrap_or_else(|_| member.path().clone());
+                let crate_path = member.path().to_path_buf();
                 let crate_id = CrateId::new(member.name().to_string(), crate_path.clone());
                 let node_idx = crate_graph.add_node(crate_id.clone());
                 crate_node_indices.insert(crate_id.clone(), node_idx);
@@ -162,10 +159,7 @@ impl AffectedAnalysis {
         // Second pass: add edges based on dependencies
         for (workspace_path, workspace_info) in workspaces {
             for member in workspace_info.members() {
-                let crate_path = member
-                    .path()
-                    .canonicalize()
-                    .unwrap_or_else(|_| member.path().clone());
+                let crate_path = member.path().to_path_buf();
                 let Some(from_id) = crate_path_index.get(&crate_path).cloned() else {
                     continue;
                 };
@@ -346,7 +340,7 @@ impl AffectedAnalysis {
             .then_some(crate_path);
 
             if let Some(path) = match_path {
-                let match_len = path.as_os_str().len();
+                let match_len = path.components().count();
                 match &best_match {
                     None => best_match = Some((match_len, crate_id.clone())),
                     Some((best_len, _)) if match_len > *best_len => {

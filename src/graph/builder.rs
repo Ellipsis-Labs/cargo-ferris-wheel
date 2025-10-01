@@ -230,14 +230,6 @@ impl DependencyGraphBuilder {
                     }
                 }
             }
-
-            if targets.is_empty() {
-                for (crate_path, ws_path) in ctx.crate_path_to_workspace.iter() {
-                    if canonical.starts_with(crate_path) || crate_path.starts_with(&canonical) {
-                        targets.insert(ws_path.clone());
-                    }
-                }
-            }
         }
 
         if targets.is_empty()
