@@ -3,10 +3,13 @@
 //! This module contains the fundamental data structures used in the dependency
 //! graph.
 
+use std::path::{Path, PathBuf};
+
 /// Represents a workspace node in the dependency graph
 #[derive(Debug, Clone)]
 pub struct WorkspaceNode {
     name: String,
+    path: Option<PathBuf>,
     crates: Vec<String>,
 }
 
@@ -19,6 +22,10 @@ impl WorkspaceNode {
         &self.name
     }
 
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
     pub fn crates(&self) -> &[String] {
         &self.crates
     }
@@ -27,6 +34,7 @@ impl WorkspaceNode {
 #[derive(Default)]
 pub struct WorkspaceNodeBuilder {
     name: Option<String>,
+    path: Option<PathBuf>,
     crates: Option<Vec<String>>,
 }
 
@@ -34,12 +42,18 @@ impl WorkspaceNodeBuilder {
     pub fn new() -> Self {
         Self {
             name: None,
+            path: None,
             crates: None,
         }
     }
 
     pub fn with_name(mut self, name: String) -> Self {
         self.name = Some(name);
+        self
+    }
+
+    pub fn with_path(mut self, path: PathBuf) -> Self {
+        self.path = Some(path);
         self
     }
 
@@ -59,6 +73,7 @@ impl crate::common::ConfigBuilder for WorkspaceNodeBuilder {
                 .ok_or_else(|| crate::error::FerrisWheelError::ConfigurationError {
                     message: "Missing required field: name".to_string(),
                 })?,
+            path: self.path,
             crates: self.crates.ok_or_else(|| {
                 crate::error::FerrisWheelError::ConfigurationError {
                     message: "Missing required field: crates".to_string(),

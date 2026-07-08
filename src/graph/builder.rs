@@ -257,6 +257,7 @@ impl DependencyGraphBuilder {
         for (ws_path, ws_info) in workspaces {
             let node = WorkspaceNode::builder()
                 .with_name(ws_info.name().to_string())
+                .with_path(ws_path.clone())
                 .with_crates(
                     ws_info
                         .members()
