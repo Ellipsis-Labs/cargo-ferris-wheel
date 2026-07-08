@@ -81,6 +81,9 @@ pub struct WorkspaceDependencyAnalysis {
     direct_deps_cache: HashMap<String, HashSet<String>>,
     reverse_deps_cache: HashMap<String, HashSet<String>>,
     transitive_deps_cache: HashMap<String, HashSet<String>>,
+    direct_deps_by_path_cache: HashMap<PathBuf, HashSet<String>>,
+    reverse_deps_by_path_cache: HashMap<PathBuf, HashSet<String>>,
+    transitive_deps_by_path_cache: HashMap<PathBuf, HashSet<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +120,9 @@ impl WorkspaceDependencyAnalysis {
             direct_deps_cache: HashMap::new(),
             reverse_deps_cache: HashMap::new(),
             transitive_deps_cache: HashMap::new(),
+            direct_deps_by_path_cache: HashMap::new(),
+            reverse_deps_by_path_cache: HashMap::new(),
+            transitive_deps_by_path_cache: HashMap::new(),
         }
     }
 
@@ -146,7 +152,11 @@ impl WorkspaceDependencyAnalysis {
             .map(|(path, _)| path)
     }
 
-    /// Get direct dependencies of a workspace
+    /// Get direct dependencies by workspace name.
+    ///
+    /// Workspace names are not guaranteed to be unique. Prefer
+    /// [`Self::get_direct_dependencies_for_path`] when the caller has a
+    /// workspace path.
     pub fn get_direct_dependencies(&mut self, workspace: &str) -> &HashSet<String> {
         if !self.direct_deps_cache.contains_key(workspace) {
             let deps = self.direct_dependencies_for(None, workspace);
@@ -157,7 +167,11 @@ impl WorkspaceDependencyAnalysis {
         &self.direct_deps_cache[workspace]
     }
 
-    /// Get workspaces that depend on this workspace (reverse dependencies)
+    /// Get workspaces that depend on this workspace by workspace name.
+    ///
+    /// Workspace names are not guaranteed to be unique. Prefer
+    /// [`Self::get_reverse_dependencies_for_path`] when the caller has a
+    /// workspace path.
     pub fn get_reverse_dependencies(&mut self, workspace: &str) -> &HashSet<String> {
         if !self.reverse_deps_cache.contains_key(workspace) {
             let deps = self.reverse_dependencies_for(None, workspace);
@@ -168,7 +182,11 @@ impl WorkspaceDependencyAnalysis {
         &self.reverse_deps_cache[workspace]
     }
 
-    /// Get all transitive dependencies of a workspace using DFS
+    /// Get all transitive dependencies by workspace name using DFS.
+    ///
+    /// Workspace names are not guaranteed to be unique. Prefer
+    /// [`Self::get_transitive_dependencies_for_path`] when the caller has a
+    /// workspace path.
     pub fn get_transitive_dependencies(&mut self, workspace: &str) -> &HashSet<String> {
         if !self.transitive_deps_cache.contains_key(workspace) {
             let deps = self.transitive_dependencies_for(None, workspace);
@@ -178,6 +196,63 @@ impl WorkspaceDependencyAnalysis {
         }
 
         &self.transitive_deps_cache[workspace]
+    }
+
+    /// Get direct dependencies by workspace path.
+    pub fn get_direct_dependencies_for_path(
+        &mut self,
+        workspace_path: impl AsRef<Path>,
+    ) -> &HashSet<String> {
+        let workspace_path = workspace_path.as_ref().to_path_buf();
+        if !self.direct_deps_by_path_cache.contains_key(&workspace_path) {
+            let deps = self.direct_dependencies_for_path(&workspace_path);
+            self.direct_deps_by_path_cache
+                .insert(workspace_path.clone(), deps);
+        }
+
+        self.direct_deps_by_path_cache
+            .get(&workspace_path)
+            .expect("path cache should contain computed direct dependencies")
+    }
+
+    /// Get workspaces that depend on this workspace by workspace path.
+    pub fn get_reverse_dependencies_for_path(
+        &mut self,
+        workspace_path: impl AsRef<Path>,
+    ) -> &HashSet<String> {
+        let workspace_path = workspace_path.as_ref().to_path_buf();
+        if !self
+            .reverse_deps_by_path_cache
+            .contains_key(&workspace_path)
+        {
+            let deps = self.reverse_dependencies_for_path(&workspace_path);
+            self.reverse_deps_by_path_cache
+                .insert(workspace_path.clone(), deps);
+        }
+
+        self.reverse_deps_by_path_cache
+            .get(&workspace_path)
+            .expect("path cache should contain computed reverse dependencies")
+    }
+
+    /// Get all transitive dependencies by workspace path using DFS.
+    pub fn get_transitive_dependencies_for_path(
+        &mut self,
+        workspace_path: impl AsRef<Path>,
+    ) -> &HashSet<String> {
+        let workspace_path = workspace_path.as_ref().to_path_buf();
+        if !self
+            .transitive_deps_by_path_cache
+            .contains_key(&workspace_path)
+        {
+            let deps = self.transitive_dependencies_for_path(&workspace_path);
+            self.transitive_deps_by_path_cache
+                .insert(workspace_path.clone(), deps);
+        }
+
+        self.transitive_deps_by_path_cache
+            .get(&workspace_path)
+            .expect("path cache should contain computed transitive dependencies")
     }
 
     fn node_index_for(
@@ -207,6 +282,19 @@ impl WorkspaceDependencyAnalysis {
         deps
     }
 
+    fn direct_dependencies_for_path(&self, workspace_path: &Path) -> HashSet<String> {
+        let mut deps = HashSet::new();
+
+        if let Some(&node_idx) = self.node_indices_by_path.get(workspace_path) {
+            for edge in self.graph.edges(node_idx) {
+                let target_node = &self.graph[edge.target()];
+                deps.insert(target_node.name().to_string());
+            }
+        }
+
+        deps
+    }
+
     fn reverse_dependencies_for(
         &self,
         workspace_path: Option<&Path>,
@@ -215,6 +303,19 @@ impl WorkspaceDependencyAnalysis {
         let mut deps = HashSet::new();
 
         if let Some(node_idx) = self.node_index_for(workspace_path, workspace_name) {
+            for edge in self.graph.edges_directed(node_idx, petgraph::Incoming) {
+                let source_node = &self.graph[edge.source()];
+                deps.insert(source_node.name().to_string());
+            }
+        }
+
+        deps
+    }
+
+    fn reverse_dependencies_for_path(&self, workspace_path: &Path) -> HashSet<String> {
+        let mut deps = HashSet::new();
+
+        if let Some(&node_idx) = self.node_indices_by_path.get(workspace_path) {
             for edge in self.graph.edges_directed(node_idx, petgraph::Incoming) {
                 let source_node = &self.graph[edge.source()];
                 deps.insert(source_node.name().to_string());
@@ -233,6 +334,17 @@ impl WorkspaceDependencyAnalysis {
         let mut deps = HashSet::new();
 
         if let Some(node_idx) = self.node_index_for(workspace_path, workspace_name) {
+            self.dfs_dependencies(node_idx, &mut visited, &mut deps);
+        }
+
+        deps
+    }
+
+    fn transitive_dependencies_for_path(&self, workspace_path: &Path) -> HashSet<String> {
+        let mut visited = HashSet::new();
+        let mut deps = HashSet::new();
+
+        if let Some(&node_idx) = self.node_indices_by_path.get(workspace_path) {
             self.dfs_dependencies(node_idx, &mut visited, &mut deps);
         }
 
@@ -487,17 +599,25 @@ impl WorkspaceDepsReportGenerator {
 
     fn dependencies_for_entry(
         &self,
-        analysis: &WorkspaceDependencyAnalysis,
+        analysis: &mut WorkspaceDependencyAnalysis,
         workspace: &WorkspaceReportEntry,
     ) -> HashSet<String> {
-        let path = workspace.path.as_deref();
-
-        if self.reverse {
-            analysis.reverse_dependencies_for(path, &workspace.name)
+        if let Some(path) = &workspace.path {
+            if self.reverse {
+                analysis.get_reverse_dependencies_for_path(path).clone()
+            } else if self.transitive {
+                analysis.get_transitive_dependencies_for_path(path).clone()
+            } else {
+                analysis.get_direct_dependencies_for_path(path).clone()
+            }
+        } else if self.reverse {
+            analysis.get_reverse_dependencies(&workspace.name).clone()
         } else if self.transitive {
-            analysis.transitive_dependencies_for(path, &workspace.name)
+            analysis
+                .get_transitive_dependencies(&workspace.name)
+                .clone()
         } else {
-            analysis.direct_dependencies_for(path, &workspace.name)
+            analysis.get_direct_dependencies(&workspace.name).clone()
         }
     }
 }
@@ -522,10 +642,15 @@ mod tests {
         let mut workspaces = HashMap::new();
         let crate_to_workspace = CrateWorkspaceMap::new();
 
+        let path_a = PathBuf::from("/test/workspace-a");
+        let path_b = PathBuf::from("/test/workspace-b");
+        let path_c = PathBuf::from("/test/workspace-c");
+
         // Create workspace nodes
         let node_a = graph.add_node(
             WorkspaceNode::builder()
                 .with_name("workspace-a".to_string())
+                .with_path(path_a.clone())
                 .with_crates(vec!["crate-a".to_string()])
                 .build()
                 .unwrap(),
@@ -534,6 +659,7 @@ mod tests {
         let node_b = graph.add_node(
             WorkspaceNode::builder()
                 .with_name("workspace-b".to_string())
+                .with_path(path_b.clone())
                 .with_crates(vec!["crate-b".to_string()])
                 .build()
                 .unwrap(),
@@ -542,6 +668,7 @@ mod tests {
         let node_c = graph.add_node(
             WorkspaceNode::builder()
                 .with_name("workspace-c".to_string())
+                .with_path(path_c.clone())
                 .with_crates(vec!["crate-c".to_string()])
                 .build()
                 .unwrap(),
@@ -569,11 +696,6 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-
-        // Create mock workspace info
-        let path_a = PathBuf::from("/test/workspace-a");
-        let path_b = PathBuf::from("/test/workspace-b");
-        let path_c = PathBuf::from("/test/workspace-c");
 
         workspaces.insert(
             path_a.clone(),
@@ -701,8 +823,9 @@ mod tests {
         let mut graph = DiGraph::new();
         let main_tools_path = PathBuf::from("/test/main/tools");
         let standalone_tools_path = PathBuf::from("/test/standalone-runner");
+        let core_path = PathBuf::from("/test/core");
 
-        graph.add_node(
+        let main_tools = graph.add_node(
             WorkspaceNode::builder()
                 .with_name("tools".to_string())
                 .with_path(main_tools_path.clone())
@@ -715,6 +838,24 @@ mod tests {
                 .with_name("tools".to_string())
                 .with_path(standalone_tools_path.clone())
                 .with_crates(vec!["tools".to_string()])
+                .build()
+                .unwrap(),
+        );
+        let core = graph.add_node(
+            WorkspaceNode::builder()
+                .with_name("core".to_string())
+                .with_path(core_path.clone())
+                .with_crates(vec!["core".to_string()])
+                .build()
+                .unwrap(),
+        );
+        graph.add_edge(
+            main_tools,
+            core,
+            DependencyEdge::builder()
+                .with_from_crate("tools-cli")
+                .with_to_crate("core")
+                .with_dependency_type(crate::graph::DependencyType::Normal)
                 .build()
                 .unwrap(),
         );
@@ -737,9 +878,27 @@ mod tests {
                 .build()
                 .unwrap(),
         );
+        workspaces.insert(
+            core_path,
+            WorkspaceInfo::builder()
+                .with_name("core")
+                .with_members(vec![])
+                .build()
+                .unwrap(),
+        );
 
         let mut analysis =
             WorkspaceDependencyAnalysis::new(&workspaces, &CrateWorkspaceMap::new(), &graph);
+        let main_deps = analysis
+            .get_direct_dependencies_for_path(&main_tools_path)
+            .clone();
+        let standalone_deps = analysis
+            .get_direct_dependencies_for_path(&standalone_tools_path)
+            .clone();
+
+        assert_eq!(main_deps, HashSet::from(["core".to_string()]));
+        assert!(standalone_deps.is_empty());
+
         let report = WorkspaceDepsReportGenerator::new(None, false, false)
             .generate_json_report(&mut analysis)
             .unwrap();
@@ -751,7 +910,7 @@ mod tests {
             .map(|workspace| workspace.path.as_str())
             .collect();
 
-        assert_eq!(json.workspaces.len(), 2);
+        assert_eq!(json.workspaces.len(), 3);
         assert!(paths.contains("/test/main/tools"));
         assert!(paths.contains("/test/standalone-runner"));
     }
