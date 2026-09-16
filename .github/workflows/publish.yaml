@@ -18,14 +18,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/rust-cache
+      - uses: jdx/mr-boxington-action@v1
         with:
-          cache-name: publish-test
+          cache-generation: publish-test
       - uses: ./.github/actions/cargo-binstall
         with:
           binaries: cargo-nextest cargo-hold
       - run: cargo hold voyage
-      - run: cargo nextest run --locked --profile ci
+      - run: mbx nextest run --locked --profile ci
 
   cross-build:
     needs: [test]
