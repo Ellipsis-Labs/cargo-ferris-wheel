@@ -80,6 +80,17 @@ _No carnival experience required! Operators standing by!_
 
 ## 🎪 Operating Instructions
 
+Both Cargo plugin and direct binary forms are supported:
+
+```bash
+cargo ferris-wheel lineup
+cargo-ferris-wheel lineup
+```
+
+Use the direct form when `cargo` is wrapped by a build cache or when the
+repository root does not contain a `Cargo.toml`. Ferris Wheel discovers nested
+workspaces itself and does not need Cargo to preflight the current directory.
+
 ### 🎡 Inspect - Spot the Dizzy Riders (Find Circular Dependencies)
 
 The `inspect` command is your primary tool for detecting circular dependencies in your Rust monorepo. It analyzes your workspace dependency graph and identifies cycles that can cause build failures and complicate dependency management.

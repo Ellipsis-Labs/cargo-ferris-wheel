@@ -241,15 +241,54 @@ pub mod executors;
 pub mod graph;
 pub mod reports;
 
-// Main entry point for the library
-pub fn run() -> miette::Result<()> {
+fn parse_cli_from<I, T>(args: I) -> Result<crate::cli::Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString>,
+{
     use clap::Parser;
 
-    use crate::cli::{CargoArgs, CargoCommand};
+    use crate::cli::{CargoArgs, CargoCommand, Cli};
+
+    let mut args = args.into_iter().map(Into::into);
+    let program = args.next().unwrap_or_default();
+    let command = args.next();
+    let cargo_plugin = command
+        .as_deref()
+        .is_some_and(|arg| arg == std::ffi::OsStr::new("ferris-wheel"));
+    let args = std::iter::once(program).chain(command).chain(args);
+
+    if cargo_plugin {
+        let cargo_args = CargoArgs::try_parse_from(args)?;
+        let CargoCommand::FerrisWheel(cli) = cargo_args.command;
+        Ok(cli)
+    } else {
+        Cli::try_parse_from(args)
+    }
+}
+
+// Main entry point for the library
+pub fn run() -> miette::Result<()> {
     use crate::commands::execute_command;
 
-    let cargo_args = CargoArgs::parse();
-    let CargoCommand::FerrisWheel(cli) = cargo_args.command;
-
+    let cli = parse_cli_from(std::env::args_os()).unwrap_or_else(|error| error.exit());
     execute_command(cli.command)
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::parse_cli_from;
+    use crate::cli::Commands;
+
+    #[test]
+    fn parses_cargo_plugin_invocation() {
+        let cli = parse_cli_from(["cargo", "ferris-wheel", "lineup"]).unwrap();
+        assert!(matches!(cli.command, Commands::Lineup { .. }));
+    }
+
+    #[test]
+    fn parses_direct_binary_invocation() {
+        let cli = parse_cli_from(["cargo-ferris-wheel", "lineup"]).unwrap();
+        assert!(matches!(cli.command, Commands::Lineup { .. }));
+    }
 }
