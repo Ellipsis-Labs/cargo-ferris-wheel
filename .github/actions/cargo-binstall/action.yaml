@@ -17,7 +17,7 @@ runs:
           hash=$(echo "${{ inputs.binaries }}" | shasum -a 256 | awk '{print $1}')
         fi
         echo "binaries-hash=$hash" >> $GITHUB_OUTPUT
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       name: Cache Cargo binaries
       id: cache-cargo-binaries
       with:
