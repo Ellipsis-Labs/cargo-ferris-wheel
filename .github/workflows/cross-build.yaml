@@ -47,11 +47,6 @@ jobs:
         with:
           cache-generation: cross-build-${{ matrix.target.arch }}
 
-      - uses: ./.github/actions/cargo-binstall
-        with:
-          binaries: cargo-hold
-      - run: cargo hold voyage
-
       - name: Determine rust target
         id: rust-target
         run: |

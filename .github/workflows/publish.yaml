@@ -23,8 +23,7 @@ jobs:
           cache-generation: publish-test
       - uses: ./.github/actions/cargo-binstall
         with:
-          binaries: cargo-nextest cargo-hold
-      - run: cargo hold voyage
+          binaries: cargo-nextest
       - run: mbx nextest run --locked --profile ci
 
   cross-build:

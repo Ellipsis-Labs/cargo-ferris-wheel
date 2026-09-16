@@ -30,10 +30,6 @@ jobs:
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: check
-      - uses: ./.github/actions/cargo-binstall
-        with:
-          binaries: cargo-hold
-      - run: cargo hold voyage
       - run: mbx check --locked --all-targets
 
   test:
@@ -49,8 +45,7 @@ jobs:
           cache-generation: test
       - uses: ./.github/actions/cargo-binstall
         with:
-          binaries: cargo-nextest cargo-hold
-      - run: cargo hold voyage
+          binaries: cargo-nextest
       - run: mbx nextest run --locked --profile ci
 
   doctest:
@@ -64,10 +59,6 @@ jobs:
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: doctest
-      - uses: ./.github/actions/cargo-binstall
-        with:
-          binaries: cargo-hold
-      - run: cargo hold voyage
       - run: mbx test --locked --doc
 
   clippy:
@@ -79,10 +70,6 @@ jobs:
         with:
           cache-generation: clippy
           toolchain: nightly-2025-07-08
-      - uses: ./.github/actions/cargo-binstall
-        with:
-          binaries: cargo-hold
-      - run: cargo hold voyage
       - run: mbx +nightly-2025-07-08 clippy --all-targets -- -D warnings
 
   fmt:
