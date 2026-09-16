@@ -43,14 +43,9 @@ jobs:
             substituters = ${{ env.NIX_CACHE_URI }} https://cache.nixos.org/
             extra-trusted-public-keys = ${{ env.NIX_SIGNING_PUBLIC_KEY }}
 
-      - uses: ./.github/actions/rust-cache
+      - uses: jdx/mr-boxington-action@v1
         with:
-          cache-name: cross-build-${{ matrix.target.arch }}
-
-      - uses: ./.github/actions/cargo-binstall
-        with:
-          binaries: cargo-hold
-      - run: cargo hold voyage
+          cache-generation: cross-build-${{ matrix.target.arch }}
 
       - name: Determine rust target
         id: rust-target
@@ -93,7 +88,7 @@ jobs:
           # Run the build
           nix develop .#crossBuildShell-${{ matrix.target.arch }} \
             --print-build-logs \
-            -c cargo build --locked --release
+            -c mbx build --locked --release
 
           # Report what was built
           if [ -s /tmp/locally-built-paths.txt ]; then
