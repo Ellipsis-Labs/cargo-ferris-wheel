@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use ignore::WalkBuilder;
 use miette::{Result, WrapErr};
 use rayon::prelude::*;
-use walkdir::WalkDir;
 
 use crate::progress::ProgressReporter;
 use crate::toml_parser::CargoToml;
@@ -79,7 +79,8 @@ impl WorkspaceDiscovery {
 
     /// Check if a path matches a glob pattern
     fn matches_pattern(&self, relative_path: &str, pattern: &str) -> bool {
-        // Try to use glob::Pattern::new for all patterns, not just those with '*'
+        // Try to use glob::Pattern::new for all patterns, not just those with
+        // '*'
         if let Ok(pattern_matcher) = glob::Pattern::new(pattern) {
             // Match against the relative path
             return pattern_matcher.matches(relative_path);
@@ -135,14 +136,17 @@ impl WorkspaceDiscovery {
         progress: Option<&ProgressReporter>,
     ) -> Result<()> {
         // First, look for Cargo.lock files as they indicate workspace roots or
-        // standalone crates
-        let lock_files: Vec<PathBuf> = WalkDir::new(path)
-            .into_iter()
+        // standalone crates. The walker respects .gitignore/.ignore rules (like
+        // rg/fd), while hidden directories are still traversed to preserve the
+        // previous walkdir behaviour.
+        let lock_files: Vec<PathBuf> = WalkBuilder::new(path)
+            .hidden(false)
             .filter_entry(|e| {
                 let name = e.file_name();
                 // Skip common directories that won't contain Cargo.lock
                 name != "target" && name != ".git" && name != "node_modules"
             })
+            .build()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name() == "Cargo.lock")
             .map(|e| e.into_path())
@@ -268,8 +272,8 @@ impl WorkspaceDiscovery {
         for (root, warnings) in results {
             if let Some(r) = root {
                 if r.is_standalone {
-                    // Don't add standalone crates yet, we need to verify they're not workspace
-                    // members
+                    // Don't add standalone crates yet, we need to verify
+                    // they're not workspace members
                     potential_standalone_crates.push(r);
                 } else {
                     // This is a workspace root, track it
@@ -311,8 +315,8 @@ impl WorkspaceDiscovery {
             roots.push(root);
         }
 
-        // Now check potential standalone crates to see if they're actually workspace
-        // members
+        // Now check potential standalone crates to see if they're actually
+        // workspace members
         for crate_root in potential_standalone_crates {
             if !self.is_path_workspace_member(&crate_root.path) {
                 // This is truly a standalone crate
@@ -327,7 +331,8 @@ impl WorkspaceDiscovery {
             }
         }
 
-        // Also check for workspace roots without Cargo.lock (less common but possible)
+        // Also check for workspace roots without Cargo.lock (less common but
+        // possible)
         self.find_additional_workspaces(path, roots, progress)?;
 
         Ok(())
@@ -339,14 +344,16 @@ impl WorkspaceDiscovery {
         roots: &mut Vec<WorkspaceRoot>,
         progress: Option<&ProgressReporter>,
     ) -> Result<()> {
-        // Look for Cargo.toml files with [workspace] sections
-        for entry in WalkDir::new(path)
-            .max_depth(3) // Don't go too deep
-            .into_iter()
+        // Look for Cargo.toml files with [workspace] sections, honouring
+        // .gitignore/.ignore rules but still traversing hidden directories.
+        for entry in WalkBuilder::new(path)
+            .max_depth(Some(3)) // Don't go too deep
+            .hidden(false)
             .filter_entry(|e| {
                 let name = e.file_name();
                 name != "target" && name != ".git" && name != "node_modules"
             })
+            .build()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name() == "Cargo.toml")
         {
@@ -933,5 +940,74 @@ name = "ignored"
 
         let standalone = roots.iter().find(|r| r.is_standalone).unwrap();
         assert_eq!(standalone.name, "ignored");
+    }
+
+    #[test]
+    fn test_gitignored_directories_are_skipped() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // .gitignore rules only apply inside a git repository
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".gitignore"), ".claude/worktrees/\n").unwrap();
+
+        // A real workspace at the root
+        fs::write(
+            root.join("Cargo.toml"),
+            r#"
+[workspace]
+"#,
+        )
+        .unwrap();
+        fs::write(root.join("Cargo.lock"), "# lock file").unwrap();
+
+        // A nested checkout inside the ignored directory, e.g. one created by
+        // Claude Code
+        fs::create_dir_all(root.join(".claude/worktrees/feature")).unwrap();
+        fs::write(
+            root.join(".claude/worktrees/feature/Cargo.toml"),
+            r#"
+[workspace]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join(".claude/worktrees/feature/Cargo.lock"),
+            "# lock file",
+        )
+        .unwrap();
+
+        let mut discovery = WorkspaceDiscovery::new();
+        let roots = discovery.discover_all(&[root.to_path_buf()], None).unwrap();
+
+        // Only the real workspace is found; the ignored nested checkout is not
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, root);
+    }
+
+    #[test]
+    fn test_hidden_directories_are_still_searched() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // A crate in a hidden directory that is not gitignored must still be
+        // discovered, matching the previous walkdir behaviour
+        fs::create_dir_all(root.join(".hidden-crate")).unwrap();
+        fs::write(
+            root.join(".hidden-crate/Cargo.toml"),
+            r#"
+[package]
+name = "hidden-crate"
+"#,
+        )
+        .unwrap();
+        fs::write(root.join(".hidden-crate/Cargo.lock"), "# lock file").unwrap();
+
+        let mut discovery = WorkspaceDiscovery::new();
+        let roots = discovery.discover_all(&[root.to_path_buf()], None).unwrap();
+
+        assert_eq!(roots.len(), 1);
+        assert!(roots[0].is_standalone);
+        assert_eq!(roots[0].name, "hidden-crate");
     }
 }
