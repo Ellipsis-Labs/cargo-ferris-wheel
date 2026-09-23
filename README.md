@@ -91,6 +91,10 @@ Use the direct form when `cargo` is wrapped by a build cache or when the
 repository root does not contain a `Cargo.toml`. Ferris Wheel discovers nested
 workspaces itself and does not need Cargo to preflight the current directory.
 
+Discovery respects `.gitignore` and `.ignore` rules, like `rg` or `fd`, so
+nested checkouts that git ignores (e.g. `.claude/worktrees/`) are skipped.
+Hidden directories that are not ignored are still searched.
+
 ### 🎡 Inspect - Spot the Dizzy Riders (Find Circular Dependencies)
 
 The `inspect` command is your primary tool for detecting circular dependencies in your Rust monorepo. It analyzes your workspace dependency graph and identifies cycles that can cause build failures and complicate dependency management.
