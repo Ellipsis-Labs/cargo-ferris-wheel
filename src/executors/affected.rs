@@ -3,6 +3,7 @@
 use std::fmt::Write;
 
 use miette::{Result, WrapErr};
+use serde::Serialize;
 
 use crate::analyzer::WorkspaceAnalyzer;
 use crate::cli::OutputFormat;
@@ -121,7 +122,19 @@ fn generate_json_report(
         result.to_json_report(analysis)
     };
 
+    let report = AffectedCliJsonReport {
+        report,
+        unmatched_files: result.unmatched_files.clone(),
+    };
+
     Ok(serde_json::to_string_pretty(&report)?)
+}
+
+#[derive(Serialize)]
+struct AffectedCliJsonReport {
+    #[serde(flatten)]
+    report: AffectedJsonReport,
+    unmatched_files: Vec<String>,
 }
 
 fn generate_human_report(
@@ -316,4 +329,172 @@ fn generate_junit_report(
     writeln!(output, r#"</testsuites>"#)?;
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use serde_json::{Value, json};
+    use tempfile::TempDir;
+
+    use super::generate_json_report;
+    use crate::analyzer::WorkspaceAnalyzer;
+    use crate::cli::OutputFormat;
+    use crate::commands::affected::AffectedAnalysis;
+    use crate::config::AffectedConfig;
+    use crate::dependency_filter::DependencyFilter;
+
+    fn create_test_workspace() -> TempDir {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/demo-app\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("crates/demo-app/src")).unwrap();
+        fs::write(
+            root.join("crates/demo-app/Cargo.toml"),
+            "[package]\nname = \"demo-app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("crates/demo-app/src/lib.rs"),
+            "pub fn demo() {}\n",
+        )
+        .unwrap();
+        fs::write(root.join("ci.yml"), "name: CI\n").unwrap();
+
+        temp
+    }
+
+    fn create_workspace_with_reverse_dependent() -> TempDir {
+        let temp = create_test_workspace();
+        let root = temp.path();
+
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/demo-app\", \"crates/demo-consumer\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("crates/demo-consumer/src")).unwrap();
+        fs::write(
+            root.join("crates/demo-consumer/Cargo.toml"),
+            "[package]\nname = \"demo-consumer\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ndemo-app = { path = \"../demo-app\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("crates/demo-consumer/src/lib.rs"),
+            "pub fn consume() { demo_app::demo(); }\n",
+        )
+        .unwrap();
+
+        temp
+    }
+
+    fn generate_report(temp: &TempDir, files: Vec<String>, direct_only: bool) -> Value {
+        let root = temp.path();
+        let mut analyzer = WorkspaceAnalyzer::new();
+        analyzer
+            .discover_workspaces(&[root.to_path_buf()], None)
+            .unwrap();
+        let analysis = AffectedAnalysis::new(
+            analyzer.workspaces(),
+            analyzer.crate_path_to_workspace(),
+            DependencyFilter::default(),
+        )
+        .unwrap();
+        let config = AffectedConfig::builder()
+            .with_files(files.clone())
+            .with_paths(vec![root.to_path_buf()])
+            .with_format(OutputFormat::Json)
+            .with_direct_only(direct_only)
+            .build()
+            .unwrap();
+        let result = analysis.analyze_affected_files(&files);
+        let output = generate_json_report(&result, &analysis, &config).unwrap();
+
+        serde_json::from_str(&output).unwrap()
+    }
+
+    #[test]
+    fn json_report_includes_only_unmatched_file() {
+        let temp = create_test_workspace();
+        let unmatched_file = temp.path().join("ci.yml").display().to_string();
+        let report = generate_report(&temp, vec![unmatched_file.clone()], false);
+
+        assert_eq!(report["unmatched_files"], json!([unmatched_file]));
+        assert_eq!(report["affected_crates"], json!([]));
+        assert_eq!(report["affected_workspaces"], json!([]));
+        assert_eq!(report["directly_affected_crates"], json!([]));
+        assert_eq!(report["directly_affected_workspaces"], json!([]));
+    }
+
+    #[test]
+    fn json_report_preserves_matched_and_unmatched_files() {
+        let temp = create_test_workspace();
+        let crate_file = temp
+            .path()
+            .join("crates/demo-app/src/lib.rs")
+            .display()
+            .to_string();
+        let unmatched_file = temp.path().join("ci.yml").display().to_string();
+        let report = generate_report(&temp, vec![crate_file, unmatched_file.clone()], false);
+
+        assert_eq!(report["unmatched_files"], json!([unmatched_file]));
+        assert_eq!(report["affected_crates"][0]["name"], "demo-app");
+        assert_eq!(report["directly_affected_crates"], json!(["demo-app"]));
+        assert_eq!(report["affected_workspaces"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn direct_only_json_report_preserves_unmatched_files() {
+        let temp = create_workspace_with_reverse_dependent();
+        let crate_file = temp
+            .path()
+            .join("crates/demo-app/src/lib.rs")
+            .display()
+            .to_string();
+        let unmatched_file = temp.path().join("ci.yml").display().to_string();
+        let files = vec![crate_file, unmatched_file.clone()];
+        let normal_report = generate_report(&temp, files.clone(), false);
+        let direct_only_report = generate_report(&temp, files, true);
+
+        let normal_affected_crates: Vec<_> = normal_report["affected_crates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|crate_info| crate_info["name"].as_str().unwrap())
+            .collect();
+        let direct_only_affected_crates: Vec<_> = direct_only_report["affected_crates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|crate_info| crate_info["name"].as_str().unwrap())
+            .collect();
+
+        assert_eq!(normal_affected_crates, vec!["demo-app", "demo-consumer"]);
+        assert_eq!(direct_only_affected_crates, vec!["demo-app"]);
+        assert_eq!(normal_report["unmatched_files"], json!([unmatched_file]));
+        assert_eq!(
+            direct_only_report["unmatched_files"],
+            json!([unmatched_file])
+        );
+    }
+
+    #[test]
+    fn json_report_includes_empty_unmatched_files_array() {
+        let temp = create_test_workspace();
+        let crate_file = temp
+            .path()
+            .join("crates/demo-app/src/lib.rs")
+            .display()
+            .to_string();
+        let report = generate_report(&temp, vec![crate_file], false);
+
+        assert_eq!(report["unmatched_files"], json!([]));
+        assert!(report["unmatched_files"].is_array());
+    }
 }
